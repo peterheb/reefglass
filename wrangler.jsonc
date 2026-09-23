@@ -1,0 +1,12 @@
+{
+  // Static site on Cloudflare Workers (assets only, no worker script).
+  // Deploy:  ./build.sh && npx wrangler deploy
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reefglass",
+  "compatibility_date": "2026-09-01",
+  "assets": { "directory": "./dist" },
+  "routes": [
+    { "pattern": "reefglass.fish", "custom_domain": true },
+    { "pattern": "www.reefglass.fish", "custom_domain": true }
+  ]
+}

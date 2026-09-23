@@ -1,0 +1,127 @@
+<title>Reefglass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" media="print" onload="this.media='all'">
+<style>
+  /* Single-look design: the page is a dark underwater world in every theme. */
+  :root{
+    color-scheme: dark;
+    --abyss:#03141f;
+    --glass:rgba(4,26,38,.58);
+    --glass-strong:rgba(3,20,30,.78);
+    --edge:rgba(150,228,226,.20);
+    --ink:#e7f6f3;
+    --ink-dim:#a3c6c6;
+    --ink-faint:#6f9a9e;
+    --coral:#ff9f5a;
+    --seaglass:#7fe6d9;
+    --f-ui:"Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --f-name:"Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --r:12px;
+  }
+  html,body{height:100%;margin:0;background:var(--abyss);overflow:hidden;}
+  body{font-family:var(--f-ui);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  #tank{position:fixed;inset:0;width:100%;height:100%;display:block;background:var(--abyss);cursor:crosshair;touch-action:manipulation;}
+  body.idle #tank{cursor:none;}
+
+  /* Field-guide tag that follows a tapped fish */
+  .tag{position:fixed;left:0;top:0;z-index:3;pointer-events:none;max-width:min(270px,calc(100vw - 32px));
+    padding:10px 13px 11px;border-radius:var(--r);background:var(--glass-strong);border:1px solid var(--edge);
+    backdrop-filter:blur(10px) saturate(1.2);-webkit-backdrop-filter:blur(10px) saturate(1.2);
+    display:flex;flex-direction:column;gap:2px;opacity:0;transition:opacity .35s ease;will-change:transform;}
+  .tag.show{opacity:1;}
+  .tag-name{font-family:var(--f-name);font-size:19px;line-height:1.15;font-weight:500;letter-spacing:.005em;text-wrap:balance;}
+  .tag-sci{font-family:var(--f-name);font-style:italic;font-size:14px;color:var(--seaglass);}
+  .tag-fact{font-size:12.5px;line-height:1.4;color:var(--ink-dim);margin-top:4px;}
+
+  /* Documentary lower-third for special visitors */
+  .caption{position:fixed;z-index:2;left:max(16px,env(safe-area-inset-left,0px) + 16px);
+    bottom:calc(env(safe-area-inset-bottom,0px) + 22px);max-width:calc(100vw - 32px);pointer-events:none;
+    display:flex;flex-direction:column;gap:3px;padding-left:14px;border-left:2px solid var(--coral);
+    opacity:0;transform:translateY(8px);transition:opacity .9s ease,transform .9s ease;}
+  .caption.show{opacity:1;transform:none;}
+  .cap-kicker{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--coral);}
+  .cap-name{font-family:var(--f-name);font-size:clamp(24px,3.2vw,40px);line-height:1.05;font-weight:400;text-shadow:0 2px 18px rgba(0,10,20,.55);text-wrap:balance;}
+  .cap-sci{font-family:var(--f-name);font-style:italic;font-size:clamp(14px,1.5vw,18px);color:var(--ink-dim);text-shadow:0 1px 10px rgba(0,10,20,.6);}
+  .cap-fact{font-size:13px;line-height:1.45;color:var(--ink-dim);max-width:44ch;margin-top:4px;text-shadow:0 1px 10px rgba(0,10,20,.7);}
+
+  /* Control dock */
+  .dock{position:fixed;z-index:4;right:max(16px,env(safe-area-inset-right,0px) + 16px);top:calc(env(safe-area-inset-top,0px) + 16px);
+    width:min(318px,calc(100vw - 32px));box-sizing:border-box;padding:12px;border-radius:14px;background:var(--glass);
+    border:1px solid var(--edge);backdrop-filter:blur(14px) saturate(1.25);-webkit-backdrop-filter:blur(14px) saturate(1.25);
+    display:flex;flex-direction:column;gap:10px;transition:opacity .6s ease,transform .6s ease,visibility 0s;}
+  .dock-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+  .brand{font-family:var(--f-name);font-size:21px;font-weight:500;letter-spacing:.01em;}
+  .brand i{color:var(--seaglass);font-weight:400;}
+  .clock{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+  .seg{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;padding:2px;border-radius:10px;background:rgba(0,12,20,.45);border:1px solid rgba(150,228,226,.10);}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--ink-dim);font:500 12.5px/1 var(--f-ui);padding:8px 0;border-radius:8px;cursor:pointer;}
+  .seg button[aria-pressed="true"]{background:rgba(127,230,217,.16);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(127,230,217,.28);}
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .btn{appearance:none;border:1px solid rgba(150,228,226,.16);background:rgba(0,12,20,.35);color:var(--ink);
+    font:500 13px/1 var(--f-ui);padding:10px 10px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;}
+  .btn:hover,.seg button:hover{color:var(--ink);background:rgba(127,230,217,.10);}
+  .btn[aria-pressed="true"]{border-color:rgba(255,159,90,.55);color:#ffd9bd;}
+  .btn svg{width:15px;height:15px;flex:none;}
+  .btn:focus-visible,.seg button:focus-visible{outline:2px solid var(--seaglass);outline-offset:2px;}
+  .hint{margin:0;font-size:12px;line-height:1.45;color:var(--ink-faint);}
+  .hint b{color:var(--ink-dim);font-weight:500;}
+  .dock-foot{display:flex;justify-content:flex-end;margin-top:-4px;}
+  .credit{font-family:var(--f-name);font-style:italic;font-size:12px;color:var(--ink-faint);opacity:.75;white-space:nowrap;}
+
+  /* Movement only reveals a small handle; the panel opens on click (and on first load) */
+  .dock-tab{position:fixed;z-index:4;right:max(16px,env(safe-area-inset-right,0px) + 16px);top:calc(env(safe-area-inset-top,0px) + 16px);
+    width:38px;height:38px;border-radius:12px;display:grid;place-items:center;padding:0;cursor:pointer;color:var(--ink-dim);
+    background:var(--glass);border:1px solid var(--edge);backdrop-filter:blur(14px) saturate(1.25);-webkit-backdrop-filter:blur(14px) saturate(1.25);
+    transition:opacity .6s ease;}
+  .dock-tab svg{width:17px;height:17px;}
+  .dock-tab:hover{color:var(--ink);}
+  .dock-tab:focus-visible{outline:2px solid var(--seaglass);outline-offset:2px;}
+  body.open .dock-tab,body.idle .dock-tab{opacity:0;pointer-events:none;}
+  body:not(.open) .dock{opacity:0;transform:translateY(-6px);pointer-events:none;visibility:hidden;transition:opacity .6s ease,transform .6s ease,visibility 0s .6s;}
+  @media (max-width:520px){
+    .dock{top:auto;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);padding:10px;gap:8px;}
+    .caption{bottom:auto;top:calc(env(safe-area-inset-top,0px) + 18px);}
+    .hint{display:none;}
+    .dock-tab{top:auto;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);}
+  }
+  @media (prefers-reduced-motion:reduce){ .tag,.caption,.dock,.dock-tab{transition:none;} }
+</style>
+
+<canvas id="tank" aria-label="An animated coral reef aquarium"></canvas>
+
+<div id="tag" class="tag" role="status" aria-live="polite">
+  <span class="tag-name"></span><span class="tag-sci"></span><span class="tag-fact"></span>
+</div>
+
+<div id="caption" class="caption" role="status" aria-live="polite">
+  <span class="cap-kicker">Special visitor</span>
+  <span class="cap-name"></span>
+  <span class="cap-sci"></span>
+  <span class="cap-fact"></span>
+</div>
+
+<div id="dock" class="dock">
+  <div class="dock-head">
+    <span class="brand">Reef<i>glass</i></span>
+    <span class="clock" id="clock">Midday</span>
+  </div>
+  <div class="seg" role="group" aria-label="Lighting">
+    <button id="modeLive" data-mode="live" aria-pressed="true" title="Follows your local sunrise, sunset and moon">Live</button>
+    <button id="modeDemo" data-mode="cycle" aria-pressed="false" title="A whole day in seven minutes, with frequent visitors">Demo</button>
+    <button id="modeDay" data-mode="day" aria-pressed="false">Day</button>
+    <button id="modeNight" data-mode="night" aria-pressed="false">Night</button>
+  </div>
+  <div class="actions">
+    <button class="btn" id="btnFeed" type="button"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="4" cy="5" r="1.6"/><circle cx="9" cy="3.5" r="1.3"/><circle cx="12" cy="7" r="1.5"/><circle cx="6.5" cy="9.5" r="1.4"/><circle cx="10" cy="12.5" r="1.2"/></svg>Feed</button>
+    <button class="btn" id="btnVisitor" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1.5 8.5c2.5-3.5 6-4.5 9.5-2.5l3-2v8l-3-2c-3.5 2-7 1-9.5-1.5z"/><circle cx="5" cy="7.6" r=".7" fill="currentColor"/></svg>Call a visitor</button>
+    <button class="btn" id="btnSound" type="button" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2 6h2.5L8 3v10L4.5 10H2z" fill="currentColor" stroke="none"/><path d="M10.5 5.5c1 1.4 1 3.6 0 5M12.5 3.8c2 2.4 2 6 0 8.4"/></svg><span>Sound off</span></button>
+    <button class="btn" id="btnFull" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg>Full screen</button>
+  </div>
+  <p class="hint"><b>Tap the water</b> to drop food. <b>Tap a fish</b> to learn what it is. <b>Live</b> follows your clock; <b>Demo</b> runs a whole day in minutes.</p>
+  <div class="dock-foot">
+    <span class="credit">by Claude Opus 5.5</span>
+  </div>
+</div>
+
+<button id="dockTab" class="dock-tab" type="button" aria-label="Show controls" title="Show controls"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/></svg></button>
