@@ -8,8 +8,9 @@ const REEF = { back: null, front: null, fg: null, fluo: null, mask: null, bandTo
 function sandY(x) { const a = REEF.sand; return a[clamp(Math.round(x / 4), 0, a.length - 1)]; }
 function reefTopAt(x) { const t = REEF.top; if (!t) return H * 0.85; return t[clamp(Math.round(x / REEF.step), 0, t.length - 1)]; }
 
-function layerCanvas(scale) {
-  const c = mk(W * PX * scale, (H - REEF.bandTop) * PX * scale), g = c.getContext('2d');
+// Layers we read pixels back from stay in CPU memory: a GPU canvas readback stalls for seconds in Chrome/Edge.
+function layerCanvas(scale, readBack = false) {
+  const c = mk(W * PX * scale, (H - REEF.bandTop) * PX * scale), g = c.getContext('2d', readBack ? { willReadFrequently: true } : undefined);
   g.setTransform(PX * scale, 0, 0, PX * scale, 0, -REEF.bandTop * PX * scale);
   return [c, g];
 }
@@ -100,8 +101,8 @@ function buildReef() {
   REEF.sand = new Float32Array(Math.ceil(W / 4) + 3);
   for (let i = 0; i < REEF.sand.length; i++) { const x = i * 4; REEF.sand[i] = H * (0.868 + 0.014 * fbm1((x / W) * 2.2 + o, 3) + 0.006 * Math.sin((x / W) * 8 + o)); }
 
-  const [back, bg] = layerCanvas(1), [front, fg] = layerCanvas(1), [fore, fog] = layerCanvas(1);
-  const [fl, flg] = layerCanvas(0.5), [mask, mg] = layerCanvas(0.25);
+  const [back, bg] = layerCanvas(1, true), [front, fg] = layerCanvas(1, true), [fore, fog] = layerCanvas(1);
+  const [fl, flg] = layerCanvas(0.5), [mask, mg] = layerCanvas(0.25, true);
   mg.fillStyle = '#000'; mg.fillRect(-10, REEF.bandTop - 10, W + 20, H);
   MK = mg; FL = flg;
 
@@ -163,7 +164,7 @@ function buildReef() {
 
   /* heightmap of the reef silhouette for swimmers */
   const st = REEF.step, cols = Math.ceil(W / st) + 1, rows = Math.ceil((H - REEF.bandTop) / st);
-  const hm = mk(cols, rows), hg = hm.getContext('2d');
+  const hm = mk(cols, rows), hg = hm.getContext('2d', { willReadFrequently: true });
   hg.drawImage(back, 0, 0, cols, rows); hg.drawImage(front, 0, 0, cols, rows);
   const hd = hg.getImageData(0, 0, cols, rows).data;
   REEF.top = new Float32Array(cols);
