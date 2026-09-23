@@ -2,7 +2,7 @@
 
 **Live at [reefglass.fish](https://reefglass.fish)**
 
-[![A sunlit coral reef with tropical fish and a sea turtle](dist/og.jpg)](https://reefglass.fish)
+[![A sunlit coral reef with tropical fish and a manta ray](dist/og.jpg)](https://reefglass.fish)
 
 A full-screen, procedurally drawn coral reef aquarium in a single HTML page: about twenty species, a real
 day/night cycle, and rare special visitors. It uses Canvas 2D and plain JavaScript; the page loads no
