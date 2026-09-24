@@ -125,9 +125,9 @@ function render(t) {
   drawList(g, buckets.far, t);
   view(g, 0.4); drawRays(g);
   view(g, 0.55); drawSnow(g, false);
-  view(g, REEF_BACK); g.drawImage(reefLayer('back'), -P, bt, W + 2 * P, bh);
+  view(g, REEF_BACK); g.drawImage(reefLayer('back'), -P, bt, W + 2 * P, bh); drawSoftCorals(g, 'back', t);
   drawList(g, buckets.mid, t);
-  view(g, REEF_FRONT); g.drawImage(reefLayer('front'), -P, bt, W + 2 * P, bh);
+  view(g, REEF_FRONT); g.drawImage(reefLayer('front'), -P, bt, W + 2 * P, bh); drawSoftCorals(g, 'front', t);
   drawCaustics(g, t); drawShadows(g);
   drawEels(g, t); drawMoray(g); drawAnemone(g, t, 'back'); drawGrass(g, t, false); drawChest(g); drawCrab(g);
   drawList(g, buckets.near, t);
