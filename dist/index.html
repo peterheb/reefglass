@@ -2496,41 +2496,69 @@ vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
 vec3 srgb(vec3 c) { return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)); }`;
 
 /* ---------- creatures ---------- */
+// One source, two programs: per-model uniforms, or (with INST defined) per-fish instance attributes so a
+// whole species draws in one call, each instance placed into its own tile of the canvas.
 const FGL_FISH_VS = `#version 300 es
 precision highp float;
+__DEFS__
 in vec3 aPos; in vec3 aNrm; in vec2 aUV; in float aFin;
-uniform vec2 uHalf, uGulp, uFish; uniform float uScale, uPX, uDepth, uPitch, uYaw, uRoll, uMirror;
-uniform float uPhase, uAmp, uAxis, uFinAmp;
+uniform float uAxis, uFinAmp;
 uniform vec4 uPart;     // hinge x, y, z; w = 1 for a rigid part, 0 for the body
 uniform vec3 uPartRot;  // in-plane tilt, splay (about the part's y axis), roll (about its x axis)
 uniform vec3 uPartS;    // part scale, applied before its rotation
 uniform vec3 uFlap;     // wing flap: amplitude, phase, rigid half-width
-out vec2 vUV, vWorld, vBody; out vec3 vN, vT, vB; out float vFin, vSide;
+#ifdef INST
+in vec4 iTile;          // tile x, y (from the canvas top), width, height, in canvas pixels
+in vec4 iFish;          // world x, y; canvas px per body length; canvas px per CSS px
+in vec4 iPose;          // pitch, yaw, roll, swim phase
+in vec4 iSwim;          // wave amplitude, gulp, near side (±1), view distance
+in vec4 iPec;           // pectoral tilt, pectoral splay, caustic strength, -
+uniform vec2 uCanvas; uniform float uPecSide, uPecZ;
+#else
+uniform vec2 uHalf, uGulp, uFish; uniform float uScale, uPX, uDepth, uPitch, uYaw, uRoll, uMirror, uPhase, uAmp, uDist, uCaus;
+#endif
+out vec2 vUV, vWorld, vBody; out vec3 vN, vT, vB; out float vFin, vSide, vDist, vCaus; out vec4 vTile;
+float gPhase, gAmp, gPitch, gYaw, gRoll, gMirror; vec3 gRot;
 // travelling wave, growing toward the tail, plus a small counter-swing of the head (recoil)
 float bend(float x) {
   float e = pow(clamp((0.3 - x) / 1.05, 0.0, 1.0), 1.5);
-  return uAmp * (e * sin(uPhase - 5.6 * (0.5 - x)) - 0.12 * max(x, 0.0) * sin(uPhase + 0.6));
+  return gAmp * (e * sin(gPhase - 5.6 * (0.5 - x)) - 0.12 * max(x, 0.0) * sin(gPhase + 0.6));
 }
 vec3 rotXY(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x * c - v.y * s, v.x * s + v.y * c, v.z); }
 vec3 rotYZ(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
 vec3 rotXZ(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c); }
-vec3 part(vec3 v) { return rotXZ(rotYZ(rotXY(v, uPartRot.x), uPartRot.z), uPartRot.y); }
+vec3 part(vec3 v) { return rotXZ(rotYZ(rotXY(v, gRot.x), gRot.z), gRot.y); }
 // model (canvas y-down) -> view: mirror, roll, pitch (canvas rotation), y up, yaw
-vec3 orient(vec3 v) { v.x *= uMirror; v = rotYZ(v, uRoll); v = rotXY(v, uPitch); v.y = -v.y; return rotXZ(v, uYaw); }
+vec3 orient(vec3 v) { v.x *= gMirror; v = rotYZ(v, gRoll); v = rotXY(v, gPitch); v.y = -v.y; return rotXZ(v, gYaw); }
 vec3 slopeZ(vec3 v, float m) { return vec3(v.x - v.z * m, v.y, v.z + v.x * m); }
 vec3 slopeY(vec3 v, float m) { return vec3(v.x - v.y * m, v.y + v.x * m, v.z); }
 void main() {
+  vec4 hinge = uPart; gRot = uPartRot;
+#ifdef INST
+  gPitch = iPose.x; gYaw = iPose.y; gRoll = iPose.z; gPhase = iPose.w; gAmp = iSwim.x; gMirror = 1.0;
+  vec2 gulp = vec2(1.0 + iSwim.y * 0.12, 1.0 - iSwim.y * 0.06), fish = iFish.xy;
+  float scale = iFish.z, pxs = iFish.w, near = iSwim.z;
+  vDist = iSwim.w; vCaus = iPec.z;
+  if (hinge.w > 0.5) { float side = uPecSide * near; hinge.z = uPecZ * side; gRot = vec3(iPec.x, iPec.y * side, 0.0); }
+#else
+  gPitch = uPitch; gYaw = uYaw; gRoll = uRoll; gPhase = uPhase; gAmp = uAmp; gMirror = uMirror;
+  vec2 gulp = uGulp, fish = uFish;
+  float scale = uScale, pxs = uPX, near = 1.0;
+  vDist = uDist; vCaus = uCaus;
+#endif
   vec3 p = aPos, n = aNrm;
   // tangent frame along the painting's +x / +y, projected onto the surface
   vec3 t = vec3(1.0, 0.0, 0.0) - n * n.x, b = vec3(0.0, 1.0, 0.0) - n * n.y;
   t = length(t) > 0.05 ? normalize(t) : normalize(cross(vec3(0.0, 1.0, 0.0), n));
   b = length(b) > 0.05 ? normalize(b) : normalize(cross(n, vec3(1.0, 0.0, 0.0)));
   vSide = aNrm.z < 0.0 ? -1.0 : 1.0;
-  if (uPart.w > 0.5) {
-    p = part(p * uPartS) + uPart.xyz; n = part(normalize(n / uPartS)); t = part(t); b = part(b);
-    float d = bend(uPart.x);
+  if (hinge.w > 0.5) {
+    p = part(p * uPartS) + hinge.xyz; n = part(normalize(n / uPartS)); t = part(t); b = part(b);
+    float d = bend(hinge.x);
     if (uAxis > 0.5) p.y += d; else p.z += d;
   } else {
+    // a fish seen from its other side swaps its two sheets, so the first-drawn sheet is always the near one
+    p.z *= near; n.z *= near; t.z *= near; b.z *= near; vSide *= near;
     if (uFlap.x > 0.0) {                 // manta: each wing hinges about the body axis, the tips lagging
       float s = p.y < 0.0 ? -1.0 : 1.0, w = max(abs(p.y) - uFlap.z, 0.0);
       float a = s * uFlap.x * sin(uFlap.y - w * 2.5) * min(w * 6.0, 1.0);
@@ -2538,24 +2566,31 @@ void main() {
       p = vec3(q.x, q.y + s * min(abs(p.y), uFlap.z), q.z); n = rotYZ(n, a); t = rotYZ(t, a); b = rotYZ(b, a);
     }
     // fin membranes ripple on their own, most at the free edge
-    p.z += aFin * uFinAmp * sin(uPhase * 1.3 + p.x * 16.0 + p.y * 9.0) * clamp(abs(p.y) * 3.0 - 0.3, 0.0, 1.0);
+    p.z += aFin * uFinAmp * sin(gPhase * 1.3 + p.x * 16.0 + p.y * 9.0) * clamp(abs(p.y) * 3.0 - 0.3, 0.0, 1.0);
     float d = bend(p.x), m = (bend(p.x + 0.01) - d) / 0.01;
     if (uAxis > 0.5) { p.y += d; n = normalize(slopeY(n, m)); t = slopeY(t, m); b = slopeY(b, m); }
     else { p.z += d; n = normalize(slopeZ(n, m)); t = slopeZ(t, m); b = slopeZ(b, m); }
   }
   vBody = aPos.xy;
-  p.xy *= uGulp;
+  p.xy *= gulp;
   p = orient(p); vN = orient(n); vT = orient(t); vB = orient(b);
-  vec2 px = p.xy * uScale;
-  gl_Position = vec4(px / uHalf, -p.z * uScale * uDepth, 1.0);
-  vUV = aUV; vFin = aFin; vWorld = uFish + vec2(px.x, -px.y) / uPX;
+  vec2 px = p.xy * scale;
+#ifdef INST
+  vec2 c = vec2(iTile.x + iTile.z * 0.5, uCanvas.y - iTile.y - iTile.w * 0.5);   // tile centre, GL pixels (y up)
+  gl_Position = vec4((c + px) / uCanvas * 2.0 - 1.0, -p.z * scale / max(iTile.z, iTile.w), 1.0);
+  vTile = vec4(iTile.x, uCanvas.y - iTile.y - iTile.w, iTile.z, iTile.w);
+#else
+  gl_Position = vec4(px / uHalf, -p.z * scale * uDepth, 1.0);
+  vTile = vec4(0.0);
+#endif
+  vUV = aUV; vFin = aFin; vWorld = fish + vec2(px.x, -px.y) / pxs;
 }`;
 
 const FGL_FISH_FS = `#version 300 es
 precision highp float;
-in vec2 vUV, vWorld, vBody; in vec3 vN, vT, vB; in float vFin, vSide;
+in vec2 vUV, vWorld, vBody; in vec3 vN, vT, vB; in float vFin, vSide, vDist, vCaus; in vec4 vTile;
 uniform sampler2D uTex, uBg; uniform vec2 uTexel;
-uniform float uDist, uCaus, uTime, uU, uDay, uSunX, uW, uH, uSSS, uBump, uGlass;
+uniform float uTime, uU, uDay, uSunX, uW, uH, uSSS, uBump, uGlass;
 uniform vec4 uMat;   // body roughness, fin roughness, scale size (body lengths; 0 = none), iridescence
 uniform vec3 uTint, uEye;   // uEye: the painted eye (x, y, radius) in body units; radius 0 = none
 uniform vec4 uRay[15]; uniform float uRayA[15]; uniform int uRayN;   // light shafts: top x, angle, width, length; strength
@@ -2597,6 +2632,7 @@ float shafts(vec2 p) {
 }
 vec3 shoulder(vec3 c) { return mix(c, 0.8 + 0.2 * (1.0 - exp(-(c - 0.8) * 5.0)), step(0.8, c)); }
 void main() {
+  if (vTile.z > 0.0 && (gl_FragCoord.x < vTile.x || gl_FragCoord.y < vTile.y || gl_FragCoord.x > vTile.x + vTile.z || gl_FragCoord.y > vTile.y + vTile.w)) discard;
   vec4 tex = texture(uTex, vUV);
   if (tex.a < 0.01) discard;
   // normal map: scales on the body + relief from the painted pattern (fin rays, band edges)
@@ -2634,9 +2670,9 @@ void main() {
   vec3 col = alb * (ambient(N) * 0.5 + sun * diff * 0.62);
   col += (sun * D * Vis * F * max(NoL, 0.0) + envSpec(reflect(-V, N), rough) * Fv * 0.5) * (0.4 + 0.6 * uDay);
   col += alb * sun * vFin * 0.7 * clamp(-NoL, 0.0, 1.0);                  // sunlight through thin fins
-  col += alb * sun * caustic(vWorld) * clamp(N.y, 0.0, 1.0) * uCaus;
+  col += alb * sun * caustic(vWorld) * clamp(N.y, 0.0, 1.0) * vCaus;
   // along the view ray the water absorbs the colour (red first) and replaces it with the water behind
-  vec3 T = exp(-uDist * vec3(1.8, 0.85, 0.65));
+  vec3 T = exp(-vDist * vec3(1.8, 0.85, 0.65));
   col = shoulder(col) * T + lin(texture(uBg, vWorld / vec2(uW, uH)).rgb) * (1.0 - T);
   // glassy bodies (jellyfish) are clear face-on and denser toward their rim
   float A = uGlass > 0.0 ? clamp(tex.a + pow(1.0 - NoV, 2.0) * uGlass, 0.0, 1.0) : tex.a;
@@ -2735,7 +2771,9 @@ function fglInit() {
   const gl = c.getContext('webgl2', { antialias: true, premultipliedAlpha: true, alpha: true, depth: true });
   if (!gl) return;
   try {
-    FGL.fish = fglProgram(gl, FGL_FISH_VS, FGL_FISH_FS, ['aPos', 'aNrm', 'aUV', 'aFin']);
+    const attrs = ['aPos', 'aNrm', 'aUV', 'aFin', 'iTile', 'iFish', 'iPose', 'iSwim', 'iPec'];
+    FGL.fish = fglProgram(gl, FGL_FISH_VS.replace('__DEFS__', ''), FGL_FISH_FS, attrs);
+    FGL.fishI = fglProgram(gl, FGL_FISH_VS.replace('__DEFS__', '#define INST'), FGL_FISH_FS, attrs);
     FGL.blur = fglProgram(gl, FGL_QUAD_VS, FGL_BLUR_FS, ['aPos']);
     FGL.relit = fglProgram(gl, FGL_QUAD_VS, FGL_RELIT_FS, ['aPos']);
   } catch (err) { console.warn('[reefglass] 3D materials disabled:', err); return; }
@@ -2745,6 +2783,7 @@ function fglInit() {
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   FGL.dyn = { vao: gl.createVertexArray(), vb: gl.createBuffer(), ib: gl.createBuffer() };
+  FGL.instBuf = gl.createBuffer(); FGL.inst = true;
   fglAttribs(FGL.dyn.vao, FGL.dyn.vb, FGL.dyn.ib);
   gl.bindVertexArray(null);
   const w = mk(1, 1), wg = w.getContext('2d'); wg.fillStyle = '#fff'; wg.fillRect(0, 0, 1, 1);
@@ -2775,7 +2814,16 @@ function fglVAO(verts, idx) {
   const gl = FGL.gl, vao = gl.createVertexArray(), vb = gl.createBuffer(), ib = gl.createBuffer();
   fglAttribs(vao, vb, ib);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
-  gl.bindVertexArray(null); return vao;
+  gl.bindVertexArray(null); vao.vb = vb; vao.ib = ib; return vao;
+}
+// the same mesh plus per-instance attributes (20 floats per fish) from the shared instance buffer
+function fglInstVAO(m) {
+  if (m.ivao) return m.ivao;
+  const gl = FGL.gl, vao = gl.createVertexArray();
+  fglAttribs(vao, m.vao.vb, m.vao.ib);
+  gl.bindBuffer(gl.ARRAY_BUFFER, FGL.instBuf);
+  for (let i = 0; i < 5; i++) { gl.enableVertexAttribArray(4 + i); gl.vertexAttribPointer(4 + i, 4, gl.FLOAT, false, 80, i * 16); gl.vertexAttribDivisor(4 + i, 1); }
+  gl.bindVertexArray(null); return (m.ivao = vao);
 }
 // build once per key (visitors are built the first time they appear)
 function fglCached(key, make) { return FGL.cache[key] || (FGL.cache[key] = make()); }
@@ -2951,25 +2999,64 @@ function fglPrepare(list, t) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, CW, CH); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  gl.useProgram(FGL.fish.p);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, FGL.bg); gl.uniform1i(u.uBg, 1);
-  gl.activeTexture(gl.TEXTURE0); gl.uniform1i(u.uTex, 0);
-  gl.uniform1f(u.uTime, t); gl.uniform1f(u.uU, U); gl.uniform1f(u.uW, W); gl.uniform1f(u.uH, H);
-  gl.uniform1f(u.uSunX, ENV.sunX); gl.uniform1f(u.uDay, TOD.day); gl.uniform1f(u.uBump, 0.5); gl.uniform1f(u.uGlass, 0);
   const rays = (ENV.rayNow || []).slice(0, 15), RA = new Float32Array(60), RK = new Float32Array(15);
   rays.forEach((q, i) => { RA.set([q.x, q.ang, q.r.w, q.r.len], i * 4); RK[i] = q.aDay + q.aNight * 0.5; });
-  gl.uniform4fv(u['uRay[0]'], RA); gl.uniform1fv(u['uRayA[0]'], RK); gl.uniform1i(u.uRayN, rays.length);
-  for (const j of jobs) {
-    if (j.ty + j.th > CH) continue;                  // out of atlas room: this one falls back to its 2D drawing
+  for (const prog of [FGL.fishI, FGL.fish]) {
+    const v = prog.u; gl.useProgram(prog.p);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, FGL.bg); gl.uniform1i(v.uBg, 1);
+    gl.activeTexture(gl.TEXTURE0); gl.uniform1i(v.uTex, 0);
+    gl.uniform1f(v.uTime, t); gl.uniform1f(v.uU, U); gl.uniform1f(v.uW, W); gl.uniform1f(v.uH, H);
+    gl.uniform1f(v.uSunX, ENV.sunX); gl.uniform1f(v.uDay, TOD.day); gl.uniform1f(v.uBump, 0.5); gl.uniform1f(v.uGlass, 0);
+    gl.uniform4fv(v['uRay[0]'], RA); gl.uniform1fv(v['uRayA[0]'], RK); gl.uniform1i(v.uRayN, rays.length);
+  }
+  // fish: one instanced batch per species
+  const fits = jobs.filter((j) => j.ty + j.th <= CH);
+  if (FGL.inst) {
+    const bySp = new Map();
+    for (const j of fits) if (j.inst) { if (!bySp.has(j.inst.sp)) bySp.set(j.inst.sp, []); bySp.get(j.inst.sp).push(j); }
+    gl.viewport(0, 0, CW, CH);
+    for (const [sp, list] of bySp) fglDrawSpecies(sp, list, CW, CH);
+  }
+  gl.useProgram(FGL.fish.p);
+  for (const j of fits) {
+    if (j.inst && FGL.inst) continue;
     const fog = depthFog(j.z);
     gl.viewport(j.tx, CH - j.ty - j.th, j.tw, j.th);
     gl.uniform2f(u.uHalf, j.tw / 2, j.th / 2); gl.uniform1f(u.uScale, j.k * PX * j.s); gl.uniform1f(u.uPX, PX * j.s);
     gl.uniform1f(u.uDepth, 1 / Math.max(j.tw, j.th)); gl.uniform2f(u.uFish, j.x, j.y);
     gl.uniform1f(u.uDist, j.z); gl.uniform1f(u.uCaus, 0.45 * TOD.day * (1 - fog));
     j.render();
-    j.obj.glTile = [j.tx, j.ty, j.tw, j.th, j.s, j.x, j.y]; FGL.tiled.push(j.obj);
   }
+  for (const j of fits) { j.obj.glTile = [j.tx, j.ty, j.tw, j.th, j.s, j.x, j.y]; FGL.tiled.push(j.obj); }
   gl.bindVertexArray(null);
+}
+
+// all fish of one species in four instanced calls: far pectorals, near sheet, far sheet, near pectorals
+function fglDrawSpecies(sp, list, CW, CH) {
+  const gl = FGL.gl, P = FGL.fishI, u = P.u, m = sp.glMesh, mat = sp.gl, n = list.length, D = new Float32Array(n * 20);
+  list.forEach((j, i) => {
+    const q = j.inst, fog = depthFog(j.z);
+    D.set([j.tx, j.ty, j.tw, j.th, j.x, j.y, j.k * PX * j.s, PX * j.s, q.pitch, q.yaw, q.roll, q.phase,
+      q.amp, q.gulp, Math.cos(q.yaw) >= 0 ? 1 : -1, j.z, q.pecTilt, q.pecSplay, 0.45 * TOD.day * (1 - fog), 0], i * 20);
+  });
+  gl.useProgram(P.p);
+  gl.bindBuffer(gl.ARRAY_BUFFER, FGL.instBuf); gl.bufferData(gl.ARRAY_BUFFER, D, gl.DYNAMIC_DRAW);
+  gl.uniform2f(u.uCanvas, CW, CH); gl.uniform1f(u.uAxis, 0); gl.uniform1f(u.uFinAmp, 0.025); gl.uniform3f(u.uFlap, 0, 0, 0);
+  gl.uniform3f(u.uPartS, 1, 1, 1); gl.uniform3f(u.uTint, 1, 1, 1);
+  gl.uniform4f(u.uMat, mat.rough ?? 0.35, mat.finRough ?? 0.6, mat.scale ?? 0, mat.iri ?? 0); gl.uniform1f(u.uSSS, mat.sss ?? 0.5);
+  const pecs = (side) => {
+    if (!m.pec) return;
+    gl.uniform1f(u.uPecSide, side); gl.uniform1f(u.uPecZ, m.pecZ); gl.uniform4f(u.uPart, sp.pecAt[0], sp.pecAt[1], 0, 1);
+    gl.uniform3f(u.uEye, 0, 0, 0); gl.uniform2f(u.uTexel, m.pec.texel[0], m.pec.texel[1]);
+    gl.bindTexture(gl.TEXTURE_2D, m.pec.tex); gl.bindVertexArray(fglInstVAO(m.pec)); gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, n);
+  };
+  pecs(-1);
+  const b = m.body; gl.uniform4f(u.uPart, 0, 0, 0, 0); gl.uniform2f(u.uTexel, b.texel[0], b.texel[1]);
+  if (b.eye) gl.uniform3f(u.uEye, b.eye[0], b.eye[1], b.eye[2]); else gl.uniform3f(u.uEye, 0, 0, 0);
+  gl.bindTexture(gl.TEXTURE_2D, b.tex); gl.bindVertexArray(fglInstVAO(b));
+  gl.drawElementsInstanced(gl.TRIANGLES, b.half, gl.UNSIGNED_SHORT, 0, n);
+  gl.drawElementsInstanced(gl.TRIANGLES, b.half, gl.UNSIGNED_SHORT, b.half * 2, n);
+  pecs(1);
 }
 
 function fglBlit(g, o) {
@@ -2999,8 +3086,10 @@ Fish.prototype.glJobs = function (t) {
   // bank into turns (the yaw rate), plus a slow idle roll
   const yr = this.glYaw === undefined ? 0 : clamp((yaw - this.glYaw) * 60, -4, 4); this.glYaw = yaw;
   this.glRoll = ease(this.glRoll || 0, clamp(yr * 0.12, -0.45, 0.45) + 0.06 * Math.sin(this.age * 0.8 + this.seed), 4, 1 / 60);
-  const hw = m.hw * gq, hh = m.hh + hw * Math.abs(Math.sin(this.pitch)) + 0.1;
-  return [{ obj: this, x: this.x, y: this.y, z: this.z, k, hw, hh, render: () => {
+  const hw = m.hw * gq, hh = m.hh + hw * Math.abs(Math.sin(this.pitch)) + 0.1, ph = this.pecPh;
+  const inst = { sp, pitch: this.pitch, yaw, roll: this.glRoll, phase: this.phase, amp: 0.22 * ta, gulp: this.gulp,
+    pecTilt: -(sp.pecAng + 0.12 * Math.sin(ph)), pecSplay: 0.3 + 0.6 * (0.5 + 0.5 * Math.sin(ph)) };
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k, hw, hh, inst, render: () => {
     fglPose({ pitch: this.pitch, yaw, roll: this.glRoll, gx: gq, gy: 1 - this.gulp * 0.06, phase: this.phase, amp: 0.22 * ta, finAmp: 0.025 });
     const near = Math.cos(yaw) >= 0 ? 1 : -1, ph = this.pecPh;
     const pec = (side) => m.pec && fglDraw(m.pec, { x: sp.pecAt[0], y: sp.pecAt[1], z: m.pecZ * side, tilt: -(sp.pecAng + 0.12 * Math.sin(ph)), splay: (0.3 + 0.6 * (0.5 + 0.5 * Math.sin(ph))) * side });
