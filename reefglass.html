@@ -243,6 +243,23 @@ function makeGlow(r, stops) {
 const depthScale = (z) => 1 - 0.56 * z;
 const depthFog = (z) => clamp(0.04 + 0.78 * Math.pow(z, 1.15), 0, 0.86);
 
+/* ---------- underwater current ---------- */
+// one slow, gusting flow along +x, in U per second; each kind of thing responds according to its drag
+const CURRENT = { v: 0 };
+function updateCurrent(t) { CURRENT.v = (REDUCED ? 0.5 : 1) * (0.55 + 0.35 * Math.sin(t * 0.045) + 0.25 * Math.sin(t * 0.13 + 1.7) + 0.1 * Math.sin(t * 0.37 + 0.4)); }
+
+/* ---------- camera parallax ---------- */
+// The viewer's head drifts (or follows the pointer); nearer layers slide further than distant ones.
+const CAM = { x: 0, y: 0, px: null, py: null, pad: 0 };
+const par = (z) => lerp(1, 0.2, clamp(z ?? 0.3, 0, 1));
+function updateCam(dt, t, following) {
+  let tx = Math.sin(t * 0.07) * 0.7 + Math.sin(t * 0.029 + 1.3) * 0.3, ty = Math.sin(t * 0.05 + 2) * 0.3;
+  if (following && CAM.px !== null) { tx = CAM.px; ty = CAM.py; }
+  const A = REDUCED ? 0 : U * 2.2;
+  CAM.x = ease(CAM.x, -tx * A, 1.2, dt); CAM.y = ease(CAM.y, -ty * A * 0.5, 1.2, dt);
+  CAM.pad = A * 1.3 + 2;   // layers are drawn this much oversize so their edges never show
+}
+
 /* ---------- time of day ---------- */
 const CYCLE_SECONDS = 420;          // one full day in "Cycle" mode
 const TOD = { mode: 'live', phase: 0.12, day: 1, warm: 0, night: 0, moon: 1, label: 'Midday' };
@@ -430,16 +447,17 @@ function buildRays() {
   for (let i = 0; i < Math.round(W / 55); i++) ENV.glints.push({ x: rand(W), y: rand(0.004, 0.05) * H, s: rand(0.6, 1.6), v: rand(-14, 14), ph: rand(TAU), f: rand(0.4, 1.3) });
 }
 
-function drawRays(g, t) {
-  const day = TOD.day, amt = REDUCED ? 0.6 : 1;
-  const sunY = -H * 1.3;
+// where each shaft is this frame; shared by the 2D rays and the 3D models swimming through them
+function updateRays(t) {
+  const day = TOD.day, amt = REDUCED ? 0.6 : 1, sunY = -H * 1.3;
+  ENV.rayNow = ENV.rays.map((r) => {
+    const x = r.x + Math.sin(t * r.f * 0.7 + r.ph) * r.sway, pulse = 0.55 + 0.45 * Math.sin(t * r.f * TAU * 0.35 + r.ph);
+    return { r, x, ang: Math.atan2(x - ENV.sunX, -sunY) * 0.9, aDay: r.a * pulse * 0.42 * day * amt, aNight: r.a * 0.55 * TOD.night * amt * TOD.moon };
+  });
+}
+function drawRays(g) {
   g.globalCompositeOperation = 'lighter';
-  for (const r of ENV.rays) {
-    const x = r.x + Math.sin(t * r.f * 0.7 + r.ph) * r.sway;
-    const ang = Math.atan2(x - ENV.sunX, -sunY) * 0.9;
-    const pulse = 0.55 + 0.45 * Math.sin(t * r.f * TAU * 0.35 + r.ph);
-    const aDay = r.a * pulse * 0.42 * day * amt;
-    const aNight = r.a * 0.55 * TOD.night * amt * TOD.moon;
+  for (const { r, x, ang, aDay, aNight } of ENV.rayNow) {
     g.save(); g.translate(x, -H * 0.01); g.rotate(-ang);
     if (aDay > 0.005) { g.globalAlpha = aDay; g.drawImage(ENV.rayWarm, -r.w / 2, 0, r.w, r.len); }
     if (aNight > 0.005) { g.globalAlpha = aNight; g.drawImage(ENV.rayCool, -r.w / 2, 0, r.w * 0.8, r.len * 0.8); }
@@ -455,6 +473,18 @@ function drawSurface(g, t) {
   gr.addColorStop(0, `rgba(235,255,252,${0.5 * lum})`); gr.addColorStop(0.35, `rgba(170,240,245,${0.16 * lum})`); gr.addColorStop(1, 'rgba(120,220,240,0)');
   g.fillStyle = gr; g.fillRect(0, 0, W, H * 0.1);
   g.globalCompositeOperation = 'lighter';
+  // the underside of the waves: two drifting ripple patterns, squashed by the grazing view and fading with distance below
+  if (ENV.cFrames.length) {
+    const F = ENV.cFrames.length, band = H * 0.075, S = ENV.cFrames[0].height;
+    for (const [dir, sp, a, tw] of [[1, 0.9, 0.17, U * 23], [-1, 0.55, 0.11, U * 37]]) {   // unequal tiles, so the repeats never line up
+      const fr = ENV.cFrames[Math.floor(t * 5 * sp) % F], off = ((t * U * 2.4 * sp * dir) % tw + tw) % tw;
+      for (const [y0, y1, k] of [[0, 0.35, 1], [0.35, 0.65, 0.55], [0.65, 1, 0.2]]) {
+        g.globalAlpha = a * k * lum;
+        for (let x = -tw + off; x < W + tw; x += tw) g.drawImage(fr, 0, S * y0, S, S * (y1 - y0), x, band * y0, tw, band * (y1 - y0));
+      }
+    }
+    g.globalAlpha = 1;
+  }
   // travelling wave lines
   for (let k = 0; k < 4; k++) {
     const y0 = H * (0.012 + k * 0.011), amp = H * (0.004 + k * 0.0015), sp = 0.35 + k * 0.17;
@@ -507,7 +537,8 @@ function buildCausticFrames() {
 
 function drawCaustics(g, t) {
   if (!REEF.mask || !ENV.cFrames.length) return;
-  const inten = 0.36 * TOD.day + 0.05 * TOD.night;
+  // the 3D mode's mask follows the surfaces' real slope, so it can take stronger light
+  const inten = (FGL.on ? 0.46 : 0.36) * TOD.day + 0.05 * TOD.night;
   if (inten < 0.02) return;
   const L = ENV.cLayer, lg = L.getContext('2d');
   const F = ENV.cFrames.length, ft = (t * (REDUCED ? 3 : 7)) % F, i0 = Math.floor(ft), fr = ft - i0;
@@ -521,17 +552,18 @@ function drawCaustics(g, t) {
   lg.globalCompositeOperation = 'lighter'; lg.globalAlpha = fr;
   pb.setTransform(m); lg.fillStyle = pb; lg.fillRect(0, 0, L.width, L.height);
   lg.globalAlpha = 1; lg.globalCompositeOperation = 'destination-in';
-  lg.drawImage(REEF.mask, 0, 0, L.width, L.height);
+  lg.drawImage(reefLayer('mask'), 0, 0, L.width, L.height);
   lg.globalCompositeOperation = 'source-over';
   g.globalCompositeOperation = 'lighter'; g.globalAlpha = inten;
-  g.drawImage(L, 0, REEF.bandTop, W, H - REEF.bandTop);
+  g.drawImage(L, -CAM.pad, REEF.bandTop, W + 2 * CAM.pad, H - REEF.bandTop);
   g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 }
 
 /* ---------- grading and lens ---------- */
 function drawGrade(g) {
   const n = TOD.night, w = TOD.warm;
-  let top = mixRGB([255, 255, 255], [62, 86, 142], n), bot = mixRGB([196, 214, 232], [22, 34, 72], n);
+  // in 3D mode the water itself does the colouring by day, so the floor is only darkened, not tinted blue
+  let top = mixRGB([255, 255, 255], [62, 86, 142], n), bot = mixRGB(FGL.on ? [222, 228, 234] : [196, 214, 232], [22, 34, 72], n);
   top = mixRGB(top, [255, 190, 150], w * 0.75); bot = mixRGB(bot, [112, 96, 150], w * 0.6);
   const gr = g.createLinearGradient(0, 0, 0, H);
   gr.addColorStop(0, rgbStr(top)); gr.addColorStop(1, rgbStr(bot));
@@ -970,6 +1002,13 @@ function paintSand(g, mg) {
     path(sp * 0.22); g.strokeStyle = `rgba(90,66,40,${0.08 + t * 0.1})`; g.lineWidth = sp * 0.16; g.stroke();
     y += sp * srand(0.8, 1.2);
   }
+  for (let i = 0; i < W / 45; i++) {
+    const x = srand(W), y = srand(sandY(x) + U * 0.6, H), s = U * srand(0.18, 0.5) * lerp(0.6, 1.3, (y - top) / (H - top));
+    const c = spick([[150, 140, 128], [120, 108, 96], [178, 168, 150], [96, 92, 90]]);
+    g.fillStyle = 'rgba(40,30,20,0.25)'; g.beginPath(); g.ellipse(x + s * 0.2, y + s * 0.35, s * 1.1, s * 0.45, 0, 0, TAU); g.fill();
+    const pg = g.createRadialGradient(x - s * 0.3, y - s * 0.3, s * 0.1, x, y, s); pg.addColorStop(0, rgbStr(mixRGB(c, [255, 250, 240], 0.35))); pg.addColorStop(1, rgbStr(mixRGB(c, [30, 26, 22], 0.35)));
+    g.fillStyle = pg; g.beginPath(); g.ellipse(x, y, s, s * 0.62, srand(-0.4, 0.4), 0, TAU); g.fill();
+  }
   const n = (W * (H - top)) / 26;
   for (let i = 0; i < n; i++) {
     const r = SR();
@@ -1106,6 +1145,7 @@ function buildReef() {
   for (let c = 0; c < cols; c++) { let r = 0; while (r < rows && hd[(r * cols + c) * 4 + 3] < 140) r++; REEF.top[c] = REEF.bandTop + r * st; }
 
   REEF.back = back; REEF.front = front; REEF.fg = fore; REEF.fluo = fl; REEF.mask = mask;
+  REEF.lit = fglRelight(back, front);
   const cl = mk(W * PX * 0.38, (H - REEF.bandTop) * PX * 0.38); cl.scale = PX * 0.38; ENV.cLayer = cl; ENV.cPats = [];
   FL = null; MK = null;
 }
@@ -1187,7 +1227,7 @@ function drawGrass(g, t, front) {
       for (let i = 0; i <= n; i++) {
         pts.push([x, y, a]);
         const s = i / n;
-        a += (0.08 * Math.sin(t * 1.1 - x * 0.01 + b.ph) + 0.05 * Math.sin(t * 2.6 + b.ph + i * 0.5) + 0.035) * (0.4 + s * 1.2);
+        a += (0.08 * Math.sin(t * 1.1 - x * 0.01 + b.ph) + 0.05 * Math.sin(t * 2.6 + b.ph + i * 0.5) + 0.01 + CURRENT.v * 0.04) * (0.4 + s * 1.2);
         x += Math.cos(a) * seg; y += Math.sin(a) * seg;
       }
       b.pts = pts;
@@ -1293,7 +1333,7 @@ function drawChest(g) {
 function glowChest(g) { const c = LIFE.chest; if (!c || c.open < 0.05) return; g.globalAlpha = c.open * (0.35 + 0.5 * TOD.night); const s = U * 12; g.drawImage(GLOW.warm, c.x - s / 2, c.y - U * 3.6 - s / 2, s, s); g.globalAlpha = 1; }
 
 /* ---------- bubbles ---------- */
-function spawnBubble(x, y, r) { if (LIFE.bubbles.length < 420) LIFE.bubbles.push({ x, y, r, ph: rand(TAU), wf: rand(2, 5), pop: 0 }); }
+function spawnBubble(x, y, r) { if (LIFE.bubbles.length < 420) LIFE.bubbles.push({ x, y, r, ph: rand(TAU), wf: rand(2, 5), vf: rand(0.82, 1.2), pop: 0 }); }
 function updateBubbles(dt) {
   const v = REEF.vent;
   if (v) { LIFE.ventT -= dt; if (LIFE.ventT < 0) { LIFE.ventT = Math.random() < 0.08 ? 0.02 : rand(0.1, 0.35); spawnBubble(v.x + rand(-2, 2), v.y, U * rand(0.1, 0.32)); } }
@@ -1301,10 +1341,16 @@ function updateBubbles(dt) {
   for (let i = LIFE.bubbles.length - 1; i >= 0; i--) {
     const b = LIFE.bubbles[i];
     if (b.pop > 0) { b.pop += dt * 3; if (b.pop > 1) LIFE.bubbles.splice(i, 1); continue; }
-    b.y -= (U * 3.5 + b.r * 9) * dt;
-    b.x += Math.sin(b.y * 0.03 + b.ph) * b.r * 1.4 * dt * b.wf;
-    b.r *= 1 + 0.03 * dt;
-    if (b.y < surf) b.pop = 0.01;
+    b.y -= (U * 3.5 + b.r * 9) * b.vf * dt;
+    b.x += Math.sin(b.y * 0.03 + b.ph) * b.r * 1.4 * dt * b.wf + CURRENT.v * U * 0.45 * dt;
+    b.r *= 1 + 0.03 * dt;   // expands as the pressure drops
+    if (b.y < surf || (b.r < U * 0.2 && Math.random() < dt * 0.015)) b.pop = 0.01;
+  }
+  // bubbles that touch coalesce into one of the combined volume
+  const B = LIFE.bubbles;
+  for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
+    const a = B[i], c = B[j]; if (a.pop || c.pop) continue;
+    if (Math.abs(a.x - c.x) < a.r + c.r && Math.abs(a.y - c.y) < (a.r + c.r) * 0.6) { a.r = Math.cbrt(a.r ** 3 + c.r ** 3); a.vf = (a.vf + c.vf) / 2; B.splice(j, 1); j--; }
   }
 }
 function drawBubbles(g) {
@@ -1323,8 +1369,10 @@ function initSnow() {
 }
 function updateSnow(dt, t) {
   for (const p of LIFE.snow) {
-    const sp = lerp(1.4, 0.5, p.z);
-    p.y += U * 0.35 * sp * dt; p.x += (Math.sin(t * 0.25 + p.ph) * 0.4 + 0.15) * U * sp * dt;
+    // suspended matter: carried by the current, barely sinking, each wandering on its own
+    const sp = lerp(1.4, 0.5, p.z), w = p.s * 3.1;
+    p.y += U * (0.1 + 0.22 * Math.sin(t * 0.21 * w + p.ph)) * sp * dt;
+    p.x += (CURRENT.v * 0.9 + Math.sin(t * 0.17 * w + p.ph * 2) * 0.35) * U * sp * dt;
     if (p.y > H + 10) { p.y = -10; p.x = rand(W); } if (p.x > W + 10) p.x = -10; if (p.x < -10) p.x = W + 10;
   }
 }
@@ -1332,7 +1380,7 @@ function drawSnow(g, near) {
   for (const p of LIFE.snow) {
     const isNear = p.z < 0.12; if (isNear !== near) continue;
     if (near) { const s = U * (1.6 + (0.12 - p.z) * 14) * p.s; g.globalAlpha = 0.07 + 0.05 * Math.sin(p.ph); g.drawImage(GLOW.soft, p.x - s / 2, p.y - s / 2, s, s); }
-    else { const s = U * lerp(0.42, 0.14, p.z) * p.s; g.globalAlpha = lerp(0.55, 0.18, p.z); g.drawImage(GLOW.dot, p.x - s / 2, p.y - s / 2, s, s); }
+    else { const s = U * lerp(0.42, 0.14, p.z) * p.s; g.globalAlpha = lerp(0.42, 0.1, p.z); g.drawImage(GLOW.dot, p.x - s / 2, p.y - s / 2, s, s); }
   }
   g.globalAlpha = 1;
 }
@@ -1353,7 +1401,7 @@ function updateFood(dt, t) {
   for (let i = LIFE.food.length - 1; i >= 0; i--) {
     const f = LIFE.food[i]; f.life += dt;
     if (f.rest > 0) { f.rest += dt; if (f.rest > 14) LIFE.food.splice(i, 1); continue; }
-    f.y += f.vy * dt; f.x += Math.sin(t * 1.3 + f.ph) * U * 0.6 * dt; f.rot += dt * 0.8;
+    f.y += f.vy * dt; f.x += (Math.sin(t * 1.3 + f.ph) * 0.6 + CURRENT.v * 0.4) * U * dt; f.rot += dt * 0.8;
     if (f.y >= reefTopAt(f.x) - U * 0.3) f.rest = 0.01;
   }
 }
@@ -1543,9 +1591,12 @@ CRAB.anchor = () => [CRAB.x, CRAB.y - U * 2.5];
 const SPECIES = {};
 function defSpecies(id, d) { d.id = id; SPECIES[id] = d; return d; }
 
+// set while painting 3D fish textures: shade() records the body outline instead of baking in light,
+// and rim() leaves out the cartoon outer outline
+let FLAT_PAINT = null;
 function rim(g, path, inner, innerW, outer, outerW) {
   g.lineJoin = 'round';
-  if (outer) { g.strokeStyle = outer; g.lineWidth = outerW; g.stroke(path); }
+  if (outer && !FLAT_PAINT) { g.strokeStyle = outer; g.lineWidth = outerW; g.stroke(path); }
   if (inner) { g.save(); g.clip(path); g.strokeStyle = inner; g.lineWidth = innerW; g.stroke(path); g.restore(); }
 }
 function fillP(g, path, col, a = 1) { g.globalAlpha = a; g.fillStyle = col; g.fill(path); g.globalAlpha = 1; }
@@ -1557,6 +1608,7 @@ function rays(g, path, A, B, C, D, n, col, lw) {
 function vgrad(g, y0, y1, stops) { const gr = g.createLinearGradient(0, y0, 0, y1); stops.forEach(([o, c]) => gr.addColorStop(o, c)); return gr; }
 function hgrad(g, x0, x1, stops) { const gr = g.createLinearGradient(x0, 0, x1, 0); stops.forEach(([o, c]) => gr.addColorStop(o, c)); return gr; }
 function shade(g, path, y0, y1, o = {}) {
+  if (FLAT_PAINT) { FLAT_PAINT.body = FLAT_PAINT.body || path; return; }
   g.save(); g.clip(path);
   g.fillStyle = vgrad(g, y0, y1, [[0, `rgba(8,18,48,${o.top ?? 0.34})`], [0.42, 'rgba(8,18,48,0)'], [0.68, 'rgba(255,255,240,0)'], [1, `rgba(255,252,236,${o.belly ?? 0.22})`]]);
   g.fillRect(-1, y0, 2, y1 - y0);
@@ -1578,6 +1630,7 @@ function scales(g, path, s, y0, y1, dark = 'rgba(0,10,30,0.13)', light = 'rgba(2
   g.restore();
 }
 function eye(g, x, y, r, iris = '#d9a441', ring = null) {
+  if (FLAT_PAINT) (FLAT_PAINT.eyes = FLAT_PAINT.eyes || []).push([x, y, r]);
   g.fillStyle = 'rgba(0,0,0,0.3)'; g.beginPath(); g.arc(x, y, r * 1.25, 0, TAU); g.fill();
   if (ring) { g.fillStyle = ring; g.beginPath(); g.arc(x, y, r * 1.1, 0, TAU); g.fill(); }
   const gr = g.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
@@ -1624,7 +1677,7 @@ function simplePec(len, h, col, a = 0.6, edge = null) {
 defSpecies('clown', {
   name: 'Ocellaris clownfish', sci: 'Amphiprion ocellaris', fact: 'A slime coat protects it from its anemone’s stings. All are born male; the dominant fish becomes female.',
   len: 5.4, res: 220, box: [1.04, 0.84], tailBox: [0.3, 0.46], tailAt: [-0.47, 0], pecBox: [0.18, 0.14], pecAt: [0.16, 0.05], pecAng: 0.35,
-  swim: { speed: 2.4, burst: 7, agility: 3.2, tailHz: 3.4, tailAmp: 0.55 }, behavior: 'home', zone: [0.55, 1], z: [0.2, 0.28], count: 3,
+  swim: { speed: 2.4, burst: 7, agility: 3.2, tailHz: 3.4, tailAmp: 0.55 }, behavior: 'home', zone: [0.55, 1], z: [0.2, 0.28], count: 3, gl: { thick: 0.55, scale: 0.03, rough: 0.38, sss: 1 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.01); body.bezierCurveTo(0.46, -0.14, 0.3, -0.215, 0.1, -0.215); body.bezierCurveTo(-0.15, -0.22, -0.36, -0.14, -0.5, -0.07); body.lineTo(-0.5, 0.07); body.bezierCurveTo(-0.36, 0.14, -0.15, 0.205, 0.1, 0.2); body.bezierCurveTo(0.3, 0.2, 0.46, 0.13, 0.5, 0.03); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.2, -0.19); dors.bezierCurveTo(0.14, -0.31, 0.04, -0.31, -0.02, -0.27); dors.bezierCurveTo(-0.1, -0.38, -0.28, -0.39, -0.41, -0.1); dors.lineTo(0.2, -0.12); dors.closePath();
@@ -1649,7 +1702,7 @@ defSpecies('clown', {
 defSpecies('bluetang', {
   name: 'Blue tang', sci: 'Paracanthurus hepatus', fact: 'A surgeonfish: a scalpel-sharp spine hides at the base of its tail.',
   len: 9.2, res: 300, box: [1.04, 0.84], tailBox: [0.26, 0.5], tailAt: [-0.47, 0], pecBox: [0.2, 0.14], pecAt: [0.18, 0.06], pecAng: 0.3,
-  swim: { speed: 4.2, burst: 10, agility: 2.2, tailHz: 2.4, tailAmp: 0.5 }, behavior: 'cruise', zone: [0.1, 0.85], z: [0.05, 0.75], count: 3,
+  swim: { speed: 4.2, burst: 10, agility: 2.2, tailHz: 2.4, tailAmp: 0.5 }, behavior: 'cruise', zone: [0.1, 0.85], z: [0.05, 0.75], count: 3, gl: { thick: 0.34, scale: 0.014, rough: 0.3, iri: 0.25, sss: 0.5 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.04); body.bezierCurveTo(0.47, -0.12, 0.34, -0.27, 0.1, -0.29); body.bezierCurveTo(-0.15, -0.3, -0.38, -0.16, -0.5, -0.06); body.lineTo(-0.5, 0.06); body.bezierCurveTo(-0.38, 0.16, -0.15, 0.3, 0.1, 0.29); body.bezierCurveTo(0.34, 0.27, 0.46, 0.16, 0.5, 0.06); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.28, -0.24); dors.bezierCurveTo(0.15, -0.38, -0.2, -0.39, -0.45, -0.13); dors.lineTo(0, -0.2); dors.closePath();
@@ -1680,7 +1733,7 @@ defSpecies('bluetang', {
 defSpecies('yellowtang', {
   name: 'Yellow tang', sci: 'Zebrasoma flavescens', fact: 'Grazes algae all day. At night its yellow dulls and a pale patch appears on its side.',
   len: 7.4, res: 280, box: [1.04, 1.18], tailBox: [0.24, 0.44], tailAt: [-0.47, 0], pecBox: [0.18, 0.14], pecAt: [0.16, 0.04], pecAng: 0.35,
-  swim: { speed: 3.4, burst: 8, agility: 2.4, tailHz: 2.2, tailAmp: 0.45 }, behavior: 'picker', zone: [0.15, 0.95], z: [0.08, 0.7], count: 3,
+  swim: { speed: 3.4, burst: 8, agility: 2.4, tailHz: 2.2, tailAmp: 0.45 }, behavior: 'picker', zone: [0.15, 0.95], z: [0.08, 0.7], count: 3, gl: { thick: 0.3, scale: 0.012, rough: 0.35, sss: 0.6 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.03); body.bezierCurveTo(0.44, -0.08, 0.36, -0.2, 0.2, -0.3); body.bezierCurveTo(0.0, -0.37, -0.3, -0.25, -0.5, -0.07); body.lineTo(-0.5, 0.07); body.bezierCurveTo(-0.3, 0.25, 0.0, 0.36, 0.2, 0.3); body.bezierCurveTo(0.36, 0.22, 0.44, 0.11, 0.5, 0.05); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.25, -0.28); dors.bezierCurveTo(0.15, -0.5, -0.06, -0.58, -0.26, -0.46); dors.bezierCurveTo(-0.37, -0.37, -0.44, -0.22, -0.47, -0.09); dors.lineTo(0, -0.2); dors.closePath();
@@ -1702,7 +1755,7 @@ defSpecies('yellowtang', {
 defSpecies('idol', {
   name: 'Moorish idol', sci: 'Zanclus cornutus', fact: 'The only living member of its family, Zanclidae. Its trailing dorsal streamer can outgrow its body.',
   len: 8.4, res: 300, box: [1.04, 1.5], tailBox: [0.24, 0.4], tailAt: [-0.47, 0], pecBox: [0.16, 0.12], pecAt: [0.12, 0.08], pecAng: 0.4,
-  swim: { speed: 3.2, burst: 8, agility: 2, tailHz: 2, tailAmp: 0.45 }, behavior: 'picker', zone: [0.2, 0.9], z: [0.1, 0.65], count: 2,
+  swim: { speed: 3.2, burst: 8, agility: 2, tailHz: 2, tailAmp: 0.45 }, behavior: 'picker', zone: [0.2, 0.9], z: [0.1, 0.65], count: 2, gl: { thick: 0.3, scale: 0.015, rough: 0.3, iri: 0.1 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.05); body.bezierCurveTo(0.45, 0.01, 0.38, -0.03, 0.3, -0.12); body.bezierCurveTo(0.24, -0.34, 0.05, -0.45, -0.1, -0.4); body.bezierCurveTo(-0.3, -0.3, -0.42, -0.14, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.42, 0.14, -0.3, 0.3, -0.1, 0.38); body.bezierCurveTo(0.08, 0.42, 0.24, 0.3, 0.3, 0.14); body.bezierCurveTo(0.36, 0.09, 0.44, 0.08, 0.5, 0.07); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.04, -0.42); dors.bezierCurveTo(0.0, -0.58, -0.05, -0.68, -0.09, -0.72); dors.bezierCurveTo(-0.17, -0.56, -0.34, -0.3, -0.46, -0.1); dors.lineTo(-0.1, -0.3); dors.closePath();
@@ -1742,7 +1795,7 @@ defSpecies('idol', {
 defSpecies('emperor', {
   name: 'Emperor angelfish', sci: 'Pomacanthus imperator', fact: 'Juveniles wear white rings on navy blue, then transform into these yellow-striped adults.',
   len: 10.5, res: 320, box: [1.04, 0.98], tailBox: [0.24, 0.46], tailAt: [-0.47, 0], pecBox: [0.2, 0.14], pecAt: [0.13, 0.06], pecAng: 0.3,
-  swim: { speed: 3.3, burst: 8, agility: 1.8, tailHz: 1.9, tailAmp: 0.45 }, behavior: 'picker', zone: [0.25, 0.95], z: [0.05, 0.6], count: 1,
+  swim: { speed: 3.3, burst: 8, agility: 1.8, tailHz: 1.9, tailAmp: 0.45 }, behavior: 'picker', zone: [0.25, 0.95], z: [0.05, 0.6], count: 1, gl: { thick: 0.35, scale: 0.02, rough: 0.3, iri: 0.15 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.05); body.bezierCurveTo(0.47, -0.1, 0.36, -0.26, 0.15, -0.3); body.bezierCurveTo(-0.1, -0.34, -0.36, -0.2, -0.5, -0.07); body.lineTo(-0.5, 0.07); body.bezierCurveTo(-0.36, 0.2, -0.1, 0.34, 0.15, 0.3); body.bezierCurveTo(0.36, 0.26, 0.47, 0.14, 0.5, 0.06); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.12, -0.3); dors.bezierCurveTo(-0.05, -0.43, -0.3, -0.44, -0.44, -0.3); dors.bezierCurveTo(-0.5, -0.22, -0.49, -0.12, -0.47, -0.08); dors.lineTo(0, -0.2); dors.closePath();
@@ -1774,7 +1827,7 @@ defSpecies('emperor', {
 defSpecies('copperband', {
   name: 'Copperband butterflyfish', sci: 'Chelmon rostratus', fact: 'Its tweezer snout plucks worms from crevices; the false eyespot near its tail confuses predators.',
   len: 7.2, res: 280, box: [1.04, 1.02], tailBox: [0.22, 0.38], tailAt: [-0.47, 0], pecBox: [0.16, 0.12], pecAt: [0.12, 0.06], pecAng: 0.35,
-  swim: { speed: 2.8, burst: 7, agility: 2.2, tailHz: 2.4, tailAmp: 0.45 }, behavior: 'picker', zone: [0.3, 0.97], z: [0.08, 0.55], count: 2,
+  swim: { speed: 2.8, burst: 7, agility: 2.2, tailHz: 2.4, tailAmp: 0.45 }, behavior: 'picker', zone: [0.3, 0.97], z: [0.08, 0.55], count: 2, gl: { thick: 0.3, scale: 0.02, rough: 0.32, iri: 0.15 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.0); body.lineTo(0.3, -0.045); body.bezierCurveTo(0.24, -0.25, 0.05, -0.36, -0.12, -0.34); body.bezierCurveTo(-0.3, -0.3, -0.44, -0.15, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.44, 0.15, -0.3, 0.3, -0.12, 0.33); body.bezierCurveTo(0.05, 0.35, 0.24, 0.22, 0.3, 0.035); body.lineTo(0.5, 0.018); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.1, -0.33); dors.bezierCurveTo(-0.08, -0.46, -0.3, -0.5, -0.42, -0.32); dors.bezierCurveTo(-0.47, -0.22, -0.48, -0.12, -0.48, -0.06); dors.lineTo(-0.1, -0.2); dors.closePath();
@@ -1800,7 +1853,7 @@ defSpecies('copperband', {
 defSpecies('mandarin', {
   name: 'Mandarinfish', sci: 'Synchiropus splendidus', fact: 'One of very few animals coloured by true blue pigment rather than light-scattering structures.',
   len: 4.6, res: 220, box: [1.04, 0.95], tailBox: [0.26, 0.4], tailAt: [-0.47, 0], pecBox: [0.26, 0.26], pecAt: [0.18, 0.05], pecAng: 0.2,
-  swim: { speed: 1.2, burst: 3, agility: 3.5, tailHz: 2.2, tailAmp: 0.4, hop: true }, behavior: 'bottom', zone: [0.9, 1], z: [0.12, 0.3], count: 1,
+  swim: { speed: 1.2, burst: 3, agility: 3.5, tailHz: 2.2, tailAmp: 0.4, hop: true }, behavior: 'bottom', zone: [0.9, 1], z: [0.12, 0.3], count: 1, gl: { thick: 0.6, scale: 0.01, rough: 0.22, sss: 0.4 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.04); body.bezierCurveTo(0.48, -0.1, 0.35, -0.19, 0.15, -0.18); body.bezierCurveTo(-0.15, -0.17, -0.35, -0.1, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.3, 0.12, -0.05, 0.2, 0.2, 0.19); body.bezierCurveTo(0.38, 0.18, 0.48, 0.12, 0.5, 0.06); body.closePath();
     const d1 = new Path2D(); d1.moveTo(0.14, -0.17); d1.bezierCurveTo(0.12, -0.36, 0.02, -0.46, -0.04, -0.42); d1.bezierCurveTo(-0.02, -0.3, -0.02, -0.2, -0.02, -0.16); d1.closePath();
@@ -1826,7 +1879,7 @@ defSpecies('mandarin', {
 defSpecies('lion', {
   name: 'Red lionfish', sci: 'Pterois volitans', fact: 'Its fin spines carry venom. Native to the Indo-Pacific, it has become invasive across the Caribbean.',
   len: 11, res: 320, box: [1.06, 1.45], tailBox: [0.3, 0.44], tailAt: [-0.47, 0], pecBox: [0.8, 0.95], pecAt: [0.16, 0.08], pecAng: 0.0,
-  swim: { speed: 1.4, burst: 5, agility: 1.2, tailHz: 1.2, tailAmp: 0.35, pecHz: 0.6 }, behavior: 'hover', zone: [0.35, 0.95], z: [0.12, 0.5], count: 1,
+  swim: { speed: 1.4, burst: 5, agility: 1.2, tailHz: 1.2, tailAmp: 0.35, pecHz: 0.6 }, behavior: 'hover', zone: [0.35, 0.95], z: [0.12, 0.5], count: 1, gl: { thick: 0.45, scale: 0.02, rough: 0.45 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.02); body.bezierCurveTo(0.46, -0.12, 0.3, -0.2, 0.1, -0.19); body.bezierCurveTo(-0.15, -0.18, -0.35, -0.1, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.3, 0.12, -0.1, 0.19, 0.12, 0.19); body.bezierCurveTo(0.32, 0.19, 0.46, 0.12, 0.5, 0.04); body.closePath();
     const soft = new Path2D(); soft.moveTo(-0.14, -0.17); soft.bezierCurveTo(-0.2, -0.36, -0.4, -0.34, -0.47, -0.07); soft.lineTo(-0.3, -0.1); soft.closePath();
@@ -1865,7 +1918,7 @@ defSpecies('lion', {
 defSpecies('porcupine', {
   name: 'Long-spine porcupinefish', sci: 'Diodon holocanthus', fact: 'When threatened it gulps water, swelling into a ball bristling with spines.',
   len: 8.2, res: 300, box: [1.04, 0.72], tailBox: [0.2, 0.34], tailAt: [-0.47, 0], pecBox: [0.16, 0.16], pecAt: [0.15, 0.02], pecAng: 0.1,
-  swim: { speed: 1.6, burst: 4, agility: 1.6, tailHz: 1.8, tailAmp: 0.4, pecHz: 5 }, behavior: 'hover', zone: [0.3, 0.95], z: [0.1, 0.5], count: 1,
+  swim: { speed: 1.6, burst: 4, agility: 1.6, tailHz: 1.8, tailAmp: 0.4, pecHz: 5 }, behavior: 'hover', zone: [0.3, 0.95], z: [0.1, 0.5], count: 1, gl: { thick: 0.75, scale: 0.012, rough: 0.4 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.04); body.bezierCurveTo(0.5, -0.18, 0.3, -0.27, 0.05, -0.26); body.bezierCurveTo(-0.2, -0.25, -0.38, -0.14, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.38, 0.16, -0.2, 0.28, 0.05, 0.28); body.bezierCurveTo(0.3, 0.28, 0.5, 0.2, 0.5, 0.06); body.closePath();
     const dors = new Path2D(); dors.moveTo(-0.3, -0.16); dors.bezierCurveTo(-0.34, -0.3, -0.44, -0.28, -0.47, -0.06); dors.closePath();
@@ -1904,7 +1957,7 @@ defSpecies('porcupine', {
 defSpecies('gramma', {
   name: 'Royal gramma', sci: 'Gramma loreto', fact: 'Under ledges it swims belly-to-the-rock — even upside down.',
   len: 4.2, res: 200, box: [1.04, 0.66], tailBox: [0.24, 0.34], tailAt: [-0.47, 0], pecBox: [0.14, 0.1], pecAt: [0.18, 0.04], pecAng: 0.3,
-  swim: { speed: 2, burst: 6, agility: 3.5, tailHz: 3.2, tailAmp: 0.5 }, behavior: 'picker', zone: [0.72, 1], z: [0.15, 0.4], count: 2,
+  swim: { speed: 2, burst: 6, agility: 3.5, tailHz: 3.2, tailAmp: 0.5 }, behavior: 'picker', zone: [0.72, 1], z: [0.15, 0.4], count: 2, gl: { thick: 0.5, scale: 0.03, rough: 0.35, iri: 0.1, sss: 0.7 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.02); body.bezierCurveTo(0.45, -0.1, 0.3, -0.15, 0.1, -0.15); body.bezierCurveTo(-0.15, -0.15, -0.35, -0.1, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.35, 0.1, -0.15, 0.15, 0.1, 0.15); body.bezierCurveTo(0.3, 0.15, 0.45, 0.1, 0.5, 0.03); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.2, -0.14); dors.bezierCurveTo(0.1, -0.27, -0.3, -0.27, -0.46, -0.07); dors.lineTo(0, -0.1); dors.closePath();
@@ -1925,7 +1978,7 @@ defSpecies('gramma', {
 defSpecies('parrot', {
   name: 'Steephead parrotfish', sci: 'Chlorurus microrhinos', fact: 'Crunches coral with a fused beak — much of a reef’s white sand has passed through parrotfish. Some sleep in a mucus bubble.',
   len: 13.5, res: 360, box: [1.04, 0.74], tailBox: [0.34, 0.52], tailAt: [-0.47, 0], pecBox: [0.2, 0.14], pecAt: [0.2, 0.05], pecAng: 0.3,
-  swim: { speed: 3.6, burst: 8, agility: 1.5, tailHz: 1.6, tailAmp: 0.4, pecHz: 2.2 }, behavior: 'picker', zone: [0.35, 0.97], z: [0.1, 0.6], count: 1,
+  swim: { speed: 3.6, burst: 8, agility: 1.5, tailHz: 1.6, tailAmp: 0.4, pecHz: 2.2 }, behavior: 'picker', zone: [0.35, 0.97], z: [0.1, 0.6], count: 1, gl: { thick: 0.45, scale: 0.02, rough: 0.35, iri: 0.2 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.06); body.bezierCurveTo(0.5, -0.12, 0.38, -0.22, 0.15, -0.225); body.bezierCurveTo(-0.15, -0.22, -0.38, -0.13, -0.5, -0.06); body.lineTo(-0.5, 0.06); body.bezierCurveTo(-0.38, 0.13, -0.15, 0.21, 0.15, 0.21); body.bezierCurveTo(0.38, 0.2, 0.48, 0.16, 0.5, 0.08); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.26, -0.2); dors.bezierCurveTo(0.1, -0.29, -0.3, -0.26, -0.46, -0.1); dors.lineTo(0, -0.15); dors.closePath();
@@ -1967,15 +2020,15 @@ function anthiasPaint(c1, c2, male) {
 }
 defSpecies('anthias', { name: 'Sea goldie', sci: 'Pseudanthias squamipinnis', fact: 'Lives in harems. If the male dies, the largest female changes sex and takes his place.',
   len: 4.3, res: 180, box: [1.04, 0.62], tailBox: [0.32, 0.46], tailAt: [-0.47, 0], pecBox: [0.12, 0.1], pecAt: [0.18, 0.04], pecAng: 0.3,
-  swim: { speed: 3.6, burst: 9, agility: 3, tailHz: 3.4, tailAmp: 0.5 }, behavior: 'school', zone: [0.35, 0.9], z: [0.25, 0.55], count: 22, ...anthiasPaint('#ff9a2a', '#ff7a1a', false) });
+  swim: { speed: 3.6, burst: 9, agility: 3, tailHz: 3.4, tailAmp: 0.5 }, behavior: 'school', zone: [0.35, 0.9], z: [0.25, 0.55], count: 22, gl: { thick: 0.4, scale: 0.035, rough: 0.3, iri: 0.3, sss: 0.8 }, ...anthiasPaint('#ff9a2a', '#ff7a1a', false) });
 defSpecies('anthiasM', { name: 'Sea goldie (male)', sci: 'Pseudanthias squamipinnis', fact: 'Males are magenta with a long third dorsal spine; each guards a harem of orange females.',
   len: 4.9, res: 180, box: [1.04, 0.9], tailBox: [0.34, 0.5], tailAt: [-0.47, 0], pecBox: [0.12, 0.1], pecAt: [0.18, 0.04], pecAng: 0.3,
-  swim: { speed: 3.6, burst: 9, agility: 3, tailHz: 3.4, tailAmp: 0.5 }, behavior: 'school', zone: [0.35, 0.9], z: [0.25, 0.55], count: 3, ...anthiasPaint('#e8409a', '#a02a8a', true) });
+  swim: { speed: 3.6, burst: 9, agility: 3, tailHz: 3.4, tailAmp: 0.5 }, behavior: 'school', zone: [0.35, 0.9], z: [0.25, 0.55], count: 3, gl: { thick: 0.4, scale: 0.035, rough: 0.3, iri: 0.3, sss: 0.8 }, ...anthiasPaint('#e8409a', '#a02a8a', true) });
 
 /* ---------------- Blue-green chromis ---------------- */
 defSpecies('chromis', { name: 'Blue-green chromis', sci: 'Chromis viridis', fact: 'Shoals hover above branching coral and dive into it at the first sign of danger.',
   len: 3.8, res: 150, box: [1.04, 0.66], tailBox: [0.3, 0.44], tailAt: [-0.47, 0], pecBox: [0.12, 0.1], pecAt: [0.18, 0.04], pecAng: 0.3,
-  swim: { speed: 3.2, burst: 8, agility: 3, tailHz: 3.6, tailAmp: 0.5 }, behavior: 'school', zone: [0.3, 0.85], z: [0.55, 0.9], count: 26,
+  swim: { speed: 3.2, burst: 8, agility: 3, tailHz: 3.6, tailAmp: 0.5 }, behavior: 'school', zone: [0.3, 0.85], z: [0.55, 0.9], count: 26, gl: { thick: 0.4, scale: 0.035, rough: 0.28, iri: 0.5, sss: 0.4 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.02); body.bezierCurveTo(0.46, -0.14, 0.3, -0.21, 0.1, -0.21); body.bezierCurveTo(-0.15, -0.2, -0.35, -0.12, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.35, 0.12, -0.15, 0.19, 0.1, 0.19); body.bezierCurveTo(0.3, 0.19, 0.46, 0.12, 0.5, 0.03); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.2, -0.2); dors.bezierCurveTo(0.1, -0.3, -0.3, -0.3, -0.46, -0.07); dors.lineTo(0, -0.1); dors.closePath();
@@ -1991,7 +2044,7 @@ defSpecies('chromis', { name: 'Blue-green chromis', sci: 'Chromis viridis', fact
 /* ---------------- Yellow boxfish ---------------- */
 defSpecies('boxfish', { name: 'Yellow boxfish', sci: 'Ostracion cubicus', fact: 'Armoured in a bony box, it sculls with its small fins. Stressed boxfish can release a toxin into the water.',
   len: 5.2, res: 220, box: [1.04, 0.66], tailBox: [0.22, 0.36], tailAt: [-0.44, 0], pecBox: [0.12, 0.1], pecAt: [0.16, 0.04], pecAng: 0.1,
-  swim: { speed: 1.4, burst: 3.5, agility: 2.2, tailHz: 4.5, tailAmp: 0.3, pecHz: 9 }, behavior: 'hover', zone: [0.4, 0.95], z: [0.1, 0.45], count: 1,
+  swim: { speed: 1.4, burst: 3.5, agility: 2.2, tailHz: 4.5, tailAmp: 0.3, pecHz: 9 }, behavior: 'hover', zone: [0.4, 0.95], z: [0.1, 0.45], count: 1, gl: { thick: 0.85, scale: 0.07, rough: 0.5 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.0); body.bezierCurveTo(0.5, -0.2, 0.4, -0.25, 0.2, -0.25); body.lineTo(-0.3, -0.21); body.bezierCurveTo(-0.42, -0.2, -0.46, -0.1, -0.46, -0.05); body.lineTo(-0.46, 0.05); body.bezierCurveTo(-0.46, 0.12, -0.42, 0.22, -0.3, 0.23); body.lineTo(0.2, 0.25); body.bezierCurveTo(0.4, 0.25, 0.5, 0.18, 0.5, 0.0); body.closePath();
     const dors = new Path2D(); dors.moveTo(-0.2, -0.2); dors.bezierCurveTo(-0.24, -0.3, -0.34, -0.3, -0.36, -0.2); dors.closePath();
@@ -2169,7 +2222,8 @@ class Fish {
     if (this.y < top) this.vy += (top - this.y) * 3 * dt;
     if (this.y > fl) this.vy -= (this.y - fl) * 4 * dt;
     if (this.x < -W * 0.2) this.vx += U * 8 * dt; if (this.x > W * 1.2) this.vx -= U * 8 * dt;
-    this.x += this.vx * dt; this.y += this.vy * dt;
+    this.x += (this.vx + CURRENT.v * U * 0.12 * depthScale(this.z)) * dt;
+    this.y += (this.vy + Math.sin(this.age * (0.6 + (this.seed % 0.5)) + this.seed) * U * 0.12) * dt;
     this.z = ease(this.z, this.tz, this.flee > 0 ? 1.2 : 0.25, dt);
     // orientation
     if (this.vx * this.dir < -U * 0.35 * depthScale(this.z) && this.turnCd <= 0) { this.dir = -this.dir; this.turnCd = 0.7; }
@@ -2178,26 +2232,30 @@ class Fish {
     this.pitch = ease(this.pitch, pt, 4, dt);
     this.speed = Math.hypot(this.vx, this.vy);
     const eff = clamp(this.speed / (cruise + 1), 0.25, 2.2);
-    this.phase += dt * TAU * sw.tailHz * (0.35 + 0.75 * eff) * (night ? 0.7 : 1);
+    this.phase += dt * TAU * sw.tailHz * (0.9 + 0.2 * ((this.seed * 7.13) % 1)) * (0.35 + 0.75 * eff) * (night ? 0.7 : 1);
     this.pecPh += dt * TAU * (sw.pecHz ?? 2.5) * (0.6 + 0.4 * eff);
     if (TOD.night > 0.3 && this.speed > U * 2 && Math.random() < dt * this.speed / U * 0.25) spark(this.x - this.dir * this.px * 0.5, this.y + rand(-2, 2), 0.7);
   }
   draw(g) {
-    const sp = this.sp, s = depthScale(this.z), k = this.size * U * s, fog = depthFog(this.z), dev = PX;
+    const sp = this.sp, s = depthScale(this.z), k = this.size * U * s, fog = depthFog(this.z), dev = PX, gl = !!this.glTile;
     const fx = this.face, fw = Math.max(Math.abs(fx), 0.12) * sgn(fx);
     const osc = Math.sin(this.phase), ta = sp.swim.tailAmp * clamp(0.55 + 0.5 * this.speed / (this.cruise() + 1), 0.4, 1.3);
+    const inf = this.inflate || 0, bodyA = 1 - inf;
+    // a 3D fish replaces the tail, body and pectoral sprites; overlays below still draw on top
+    if (gl && bodyA > 0.02) { g.globalAlpha = bodyA; fglBlit(g, this); g.globalAlpha = 1; }
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * sgn(fx)); g.scale(fw, 1);
     if (this.gulp > 0) g.scale(1 + this.gulp * 0.12, 1 - this.gulp * 0.06);
-    const inf = this.inflate || 0, bodyA = 1 - inf;
     if (bodyA > 0.02) {
       g.globalAlpha = bodyA;
-      g.save(); g.translate(sp.tailAt[0] * k, sp.tailAt[1] * k); g.rotate(osc * ta * 0.18); g.scale(Math.cos(osc * ta * 1.5), 1 - 0.04 * Math.abs(osc));
-      sp.tailSpr.draw(g, 0, 0, sp.tailBox[0] * k, sp.tailBox[1] * k, fog, dev); g.restore();
+      if (!gl) {
+        g.save(); g.translate(sp.tailAt[0] * k, sp.tailAt[1] * k); g.rotate(osc * ta * 0.18); g.scale(Math.cos(osc * ta * 1.5), 1 - 0.04 * Math.abs(osc));
+        sp.tailSpr.draw(g, 0, 0, sp.tailBox[0] * k, sp.tailBox[1] * k, fog, dev); g.restore();
+      }
       g.save(); g.translate(-osc * ta * k * 0.012, 0);
-      sp.bodySpr.draw(g, 0, 0, sp.box[0] * k, sp.box[1] * k, fog, dev);
+      if (!gl) sp.bodySpr.draw(g, 0, 0, sp.box[0] * k, sp.box[1] * k, fog, dev);
       if (sp.extra) { g.globalAlpha = bodyA * (1 - fog * 0.75); sp.extra(g, this, k); g.globalAlpha = bodyA; }
       g.restore();
-      if (sp.pecSpr) {
+      if (sp.pecSpr && !gl) {
         g.save(); g.translate(sp.pecAt[0] * k, sp.pecAt[1] * k); g.rotate(-(sp.pecAng + 0.28 * Math.sin(this.pecPh)));
         g.scale(0.55 + 0.45 * Math.abs(Math.cos(this.pecPh)), 1); sp.pecSpr.draw(g, 0, 0, sp.pecBox[0] * k, sp.pecBox[1] * k, fog, dev); g.restore();
       }
@@ -2223,12 +2281,18 @@ class Seahorse {
   }
   get info() { return SEAHORSE; }
   update(dt) { this.age += dt; }
-  draw(g) {
-    const b = this.blade; if (!b || !b.pts) return;
-    const n = b.pts.length - 1, i = Math.round(this.u * n), [px, py, pa] = b.pts[i];
-    const h = U * 6.2, t = this.age;
+  // where it clings on its blade of seagrass, and how it leans
+  pose() {
+    const b = this.blade; if (!b || !b.pts) return null;
+    const n = b.pts.length - 1, [px, py, pa] = b.pts[Math.round(this.u * n)], h = U * 6.2;
     this.x = px; this.y = py - h * 0.5;
-    g.save(); g.translate(px, py); g.rotate((pa + Math.PI / 2) * 0.5 + Math.sin(t * 0.4) * 0.08 - 0.05);
+    return { px, py, h, rot: (pa + Math.PI / 2) * 0.5 + Math.sin(this.age * 0.4) * 0.08 - 0.05 };
+  }
+  draw(g) {
+    if (this.glTile) return fglBlit(g, this);
+    const P = this.pose(); if (!P) return;
+    const { px, py, h } = P, t = this.age;
+    g.save(); g.translate(px, py); g.rotate(P.rot);
     const spr = SEAHORSE.spr;
     spr.draw(g, 0, 0, h * 0.8, h * 1.18, 0.05, PX);
     g.save(); g.translate(-0.12 * h, -0.52 * h); g.scale(0.35 + 0.65 * Math.abs(Math.sin(t * 37)), 1);
@@ -2237,6 +2301,21 @@ class Seahorse {
   }
   hit(x, y) { if (this.x === undefined) return -1; const r = U * 4.5; return dist2(x, y, this.x, this.y) < r * r ? Math.sqrt(dist2(x, y, this.x, this.y)) / r : -1; }
   anchor() { return [this.x, this.y - U * 3]; }
+}
+
+let SHADOW = null;
+function drawShadows(g) {
+  const day = TOD.day; if (day < 0.05) return;
+  if (!SHADOW) SHADOW = makeGlow(32, [[0, 'rgba(6,14,28,0.85)'], [0.55, 'rgba(6,14,28,0.35)'], [1, 'rgba(6,14,28,0)']]);
+  const ents = FISH.list.map((f) => [f.x, f.y, f.px, f.z]);
+  const v = VIS.active; if (v && v.k && v.x !== undefined && !v.pod) ents.push([v.x, v.y, v.k * 0.7, v.z]);
+  for (const [x, y, len, z] of ents) {
+    if (z > 0.45) continue;                             // fish behind the front reef would shade reef we barely see
+    const top = reefTopAt(x), h = top - y; if (h < 0 || h > H * 0.4) continue;
+    const k = 1 - h / (H * 0.4), sx = x + (x - ENV.sunX) / H * h * 0.6, w = len * (0.9 + (1 - k) * 0.8);
+    g.globalAlpha = 0.32 * day * k * k; g.drawImage(SHADOW, sx - w / 2, reefTopAt(sx) - w * 0.1, w, w * 0.26);
+  }
+  g.globalAlpha = 1;
 }
 
 function makeSchool(ids, n, zc) {
@@ -2277,6 +2356,634 @@ function spawnFish() {
   makeSchool(['chromis'], Math.round(clamp(24 * area, 10, 40)), 0.74);
   FISH.seahorse = new Seahorse();
 }
+
+/* =====================================================================
+   3D materials in WebGL2.
+   Creatures — every fish species, the seahorse and the special visitors are
+   drawn as lit 3D models instead of flat sprites. Most are inflated from
+   their own painted side view: the body outline (the path a painter passes
+   to shade(), or else the painted silhouette) gets a rounded cross-section
+   across its narrower dimension, fins stay thin sheets, and the painting,
+   redone without baked shading or outlines, is the albedo on both flanks.
+   Rigid parts (pectorals, flippers, sculling fins) hang off hinges with
+   tilt/splay/roll; the octopus and the diver are built from tubes and
+   ellipsoids. Swimming: a travelling body wave (sideways for fish and
+   sharks, up-and-down for dolphins and whales), head recoil, rippling fin
+   membranes, banking into turns, flapping manta wings.
+   Shading is GGX with a guanine F0 (underwater, plain tissue reflects almost
+   nothing), procedural scales plus relief from the painted pattern as the
+   normal map, subsurface wrap, and sunlight through thin fins.
+   Each model renders into its own tile of one offscreen canvas at the start
+   of the frame; its draw() copies the tile in, so depth order, fog and
+   grading work as before, and 2D overlays (streamers, eyes, lights) still
+   draw on top.
+   Reef — once per build, the painted back/front layers get a height field
+   (multi-scale blur of the silhouette + the painting's luminance detail),
+   micro relief (pitted rock, rippled grainy sand) and are re-lit from the
+   sun. Only the relief is applied, so the painted light survives.
+   Toggle everything with G.
+   ===================================================================== */
+const FGL = { on: false, want: true, gl: null, canvas: null, fish: null, blur: null, relit: null, quad: null, hdr: false, dyn: null, white: null, cache: {}, tiled: [] };
+
+const GLSL_NOISE = `
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y); }
+vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 srgb(vec3 c) { return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)); }`;
+
+/* ---------- creatures ---------- */
+const FGL_FISH_VS = `#version 300 es
+precision highp float;
+in vec3 aPos; in vec3 aNrm; in vec2 aUV; in float aFin;
+uniform vec2 uHalf, uGulp, uFish; uniform float uScale, uPX, uDepth, uPitch, uYaw, uRoll, uMirror;
+uniform float uPhase, uAmp, uAxis, uFinAmp;
+uniform vec4 uPart;     // hinge x, y, z; w = 1 for a rigid part, 0 for the body
+uniform vec3 uPartRot;  // in-plane tilt, splay (about the part's y axis), roll (about its x axis)
+uniform vec3 uFlap;     // wing flap: amplitude, phase, rigid half-width
+out vec2 vUV, vWorld, vBody; out vec3 vN, vT, vB; out float vFin, vSide;
+// travelling wave, growing toward the tail, plus a small counter-swing of the head (recoil)
+float bend(float x) {
+  float e = pow(clamp((0.3 - x) / 1.05, 0.0, 1.0), 1.5);
+  return uAmp * (e * sin(uPhase - 5.6 * (0.5 - x)) - 0.12 * max(x, 0.0) * sin(uPhase + 0.6));
+}
+vec3 rotXY(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x * c - v.y * s, v.x * s + v.y * c, v.z); }
+vec3 rotYZ(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
+vec3 rotXZ(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c); }
+vec3 part(vec3 v) { return rotXZ(rotYZ(rotXY(v, uPartRot.x), uPartRot.z), uPartRot.y); }
+// model (canvas y-down) -> view: mirror, roll, pitch (canvas rotation), y up, yaw
+vec3 orient(vec3 v) { v.x *= uMirror; v = rotYZ(v, uRoll); v = rotXY(v, uPitch); v.y = -v.y; return rotXZ(v, uYaw); }
+vec3 slopeZ(vec3 v, float m) { return vec3(v.x - v.z * m, v.y, v.z + v.x * m); }
+vec3 slopeY(vec3 v, float m) { return vec3(v.x - v.y * m, v.y + v.x * m, v.z); }
+void main() {
+  vec3 p = aPos, n = aNrm;
+  // tangent frame along the painting's +x / +y, projected onto the surface
+  vec3 t = vec3(1.0, 0.0, 0.0) - n * n.x, b = vec3(0.0, 1.0, 0.0) - n * n.y;
+  t = length(t) > 0.05 ? normalize(t) : normalize(cross(vec3(0.0, 1.0, 0.0), n));
+  b = length(b) > 0.05 ? normalize(b) : normalize(cross(n, vec3(1.0, 0.0, 0.0)));
+  vSide = aNrm.z < 0.0 ? -1.0 : 1.0;
+  if (uPart.w > 0.5) {
+    p = part(p) + uPart.xyz; n = part(n); t = part(t); b = part(b);
+    float d = bend(uPart.x);
+    if (uAxis > 0.5) p.y += d; else p.z += d;
+  } else {
+    if (uFlap.x > 0.0) {                 // manta: each wing hinges about the body axis, the tips lagging
+      float s = p.y < 0.0 ? -1.0 : 1.0, w = max(abs(p.y) - uFlap.z, 0.0);
+      float a = s * uFlap.x * sin(uFlap.y - w * 2.5) * min(w * 6.0, 1.0);
+      vec3 q = rotYZ(vec3(p.x, s * w, p.z), a);
+      p = vec3(q.x, q.y + s * min(abs(p.y), uFlap.z), q.z); n = rotYZ(n, a); t = rotYZ(t, a); b = rotYZ(b, a);
+    }
+    // fin membranes ripple on their own, most at the free edge
+    p.z += aFin * uFinAmp * sin(uPhase * 1.3 + p.x * 16.0 + p.y * 9.0) * clamp(abs(p.y) * 3.0 - 0.3, 0.0, 1.0);
+    float d = bend(p.x), m = (bend(p.x + 0.01) - d) / 0.01;
+    if (uAxis > 0.5) { p.y += d; n = normalize(slopeY(n, m)); t = slopeY(t, m); b = slopeY(b, m); }
+    else { p.z += d; n = normalize(slopeZ(n, m)); t = slopeZ(t, m); b = slopeZ(b, m); }
+  }
+  vBody = aPos.xy;
+  p.xy *= uGulp;
+  p = orient(p); vN = orient(n); vT = orient(t); vB = orient(b);
+  vec2 px = p.xy * uScale;
+  gl_Position = vec4(px / uHalf, -p.z * uScale * uDepth, 1.0);
+  vUV = aUV; vFin = aFin; vWorld = uFish + vec2(px.x, -px.y) / uPX;
+}`;
+
+const FGL_FISH_FS = `#version 300 es
+precision highp float;
+in vec2 vUV, vWorld, vBody; in vec3 vN, vT, vB; in float vFin, vSide;
+uniform sampler2D uTex, uBg; uniform vec2 uTexel;
+uniform float uDist, uCaus, uTime, uU, uDay, uSunX, uW, uH, uSSS, uBump;
+uniform vec4 uMat;   // body roughness, fin roughness, scale size (body lengths; 0 = none), iridescence
+uniform vec3 uTint, uEye;   // uEye: the painted eye (x, y, radius) in body units; radius 0 = none
+uniform vec4 uRay[15]; uniform float uRayA[15]; uniform int uRayN;   // light shafts: top x, angle, width, length; strength
+out vec4 o;
+${GLSL_NOISE}
+float caustic(vec2 p) {
+  p /= uU * 6.0; float t = uTime * 0.6;
+  vec2 q = p + 0.6 * vec2(sin(p.y * 1.3 + t), cos(p.x * 1.1 - t * 0.8));
+  float v = abs(sin(q.x * 2.1 + t) + sin(q.y * 2.6 - t * 1.2) + sin((q.x + q.y) * 1.7 + t * 0.7));
+  return pow(clamp(1.0 - v / 1.4, 0.0, 1.0), 4.0);
+}
+// overlapping scales: staggered rows of arcs, each free edge raised and facing the tail
+float scaleH(vec2 p) {
+  vec2 q = p / uMat.z;
+  float row = floor(q.y), cy = fract(q.y) - 0.5;
+  float f = fract(q.x + 0.5 * mod(row, 2.0) - 1.4 * cy * cy);
+  return (1.0 - f) * smoothstep(0.0, 0.14, f);
+}
+float lum(vec2 uv) { return dot(texture(uTex, uv).rgb, vec3(0.3, 0.59, 0.11)); }
+vec3 ambient(vec3 N) {   // water light: bright from above, blue to the sides, sand bounce below
+  vec3 up = vec3(0.95, 1.0, 1.05), side = vec3(0.5, 0.6, 0.68), down = vec3(0.5, 0.45, 0.38);
+  return N.y > 0.0 ? mix(side, up, N.y) : mix(side, down, -N.y);
+}
+vec3 envSpec(vec3 R, float rough) {  // Snell's window overhead, open water elsewhere
+  vec3 sharp = mix(vec3(0.18, 0.4, 0.55) * (0.6 + 0.4 * R.y), vec3(1.6, 1.75, 1.7), smoothstep(0.55, 0.8, R.y));
+  return mix(sharp, ambient(R) * 0.6, rough);
+}
+// how much of the sun's shafts reach this point (the same shafts the 2D rays draw)
+float shafts(vec2 p) {
+  float s = 0.0;
+  for (int i = 0; i < 15; i++) {
+    if (i >= uRayN) break;
+    vec4 r = uRay[i]; vec2 d = vec2(p.x - r.x, p.y + 0.01 * uH);
+    float c = cos(r.y), sn = sin(r.y), a = d.x * c - d.y * sn, v = (d.x * sn + d.y * c) / r.w;
+    float u = a / r.z / (0.16 + 0.34 * v);
+    s += exp(-u * u * 2.6) * pow(max(1.0 - v, 0.0), 1.6) * smoothstep(0.0, 0.06, v) * uRayA[i];
+  }
+  return s;
+}
+vec3 shoulder(vec3 c) { return mix(c, 0.8 + 0.2 * (1.0 - exp(-(c - 0.8) * 5.0)), step(0.8, c)); }
+void main() {
+  vec4 tex = texture(uTex, vUV);
+  if (tex.a < 0.01) discard;
+  // normal map: scales on the body + relief from the painted pattern (fin rays, band edges)
+  vec2 g = vec2(0.0);
+  if (vFin < 0.99 && uMat.z > 0.0) {
+    // fade the scales out once each is only a few pixels across, before they alias
+    float e = 0.12 * uMat.z, h0 = scaleH(vBody), lod = 1.0 - smoothstep(0.12, 0.3, length(fwidth(vBody)) / uMat.z);
+    g = vec2(scaleH(vBody + vec2(e, 0.0)) - h0, scaleH(vBody + vec2(0.0, e)) - h0) / e * 0.06 * uMat.z * (1.0 - vFin) * lod;
+  }
+  // the eye is a glossy dome: its highlight moves with the light
+  vec2 de = uEye.z > 0.0 ? (vBody - uEye.xy) / uEye.z : vec2(9.0);
+  float ed = dot(de, de), inEye = 1.0 - smoothstep(0.75, 1.0, ed);
+  g -= de / sqrt(max(1.0 - ed, 0.06)) * 0.5 * inEye;
+  g += vec2(lum(vUV + vec2(uTexel.x, 0.0)) - lum(vUV - vec2(uTexel.x, 0.0)), lum(vUV + vec2(0.0, uTexel.y)) - lum(vUV - vec2(0.0, uTexel.y))) * uBump;
+  vec3 N = normalize(normalize(vN) - vSide * (g.x * normalize(vT) + g.y * normalize(vB)));
+  if (vFin > 0.5 && N.z < 0.0) N = -N;                       // thin fins are lit on whichever side we see
+  const vec3 V = vec3(0.0, 0.0, 1.0);
+  vec3 L = normalize(vec3(uSunX - vWorld.x, vWorld.y + 0.15 * uH, 0.3 * uH));
+  // sunlight loses red first on its way down from the surface
+  vec3 sun = vec3(1.0, 0.96, 0.88) * exp(-clamp(vWorld.y / uH, 0.0, 1.0) * vec3(0.45, 0.12, 0.05)) * 1.35;
+  vec3 alb = lin(tex.rgb * uTint) * (1.0 + 0.1 * (vnoise(vBody * 34.0) - 0.5) + 0.06 * (vnoise(vBody * 110.0) - 0.5));
+  sun *= 0.8 + 1.6 * shafts(vWorld);                      // brighter where a shaft passes through
+  float rough = mix(mix(uMat.x, uMat.y, vFin), 0.07, inEye), a = rough * rough;
+  float NoL = dot(N, L), NoV = max(dot(N, V), 0.02);
+  // subsurface: light wraps further round the flesh in red than in blue
+  vec3 w = uSSS * vec3(0.45, 0.22, 0.12) * (1.0 - vFin);
+  vec3 diff = clamp((vec3(NoL) + w) / (1.0 + w), 0.0, 1.0);
+  // GGX specular; guanine platelets give the scales an F0 above plain tissue, iridescent at an angle
+  vec3 Hv = normalize(L + V); float NoH = max(dot(N, Hv), 0.0), VoH = max(dot(V, Hv), 0.0);
+  vec3 irid = 0.5 + 0.5 * cos(6.2832 * (NoV * 1.3 + vec3(0.0, 0.33, 0.67)));
+  vec3 F0 = mix(mix(vec3(0.035), 0.12 * irid, uMat.w) * (1.0 - 0.6 * vFin), vec3(0.05), inEye);
+  vec3 F = F0 + (1.0 - F0) * pow(1.0 - VoH, 5.0), Fv = F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0);
+  float dd = NoH * NoH * (a * a - 1.0) + 1.0, D = a * a / (3.14159 * dd * dd);
+  float k = a * 0.5, Vis = 0.25 / ((NoV * (1.0 - k) + k) * (max(NoL, 0.0) * (1.0 - k) + k));
+  vec3 col = alb * (ambient(N) * 0.5 + sun * diff * 0.62);
+  col += (sun * D * Vis * F * max(NoL, 0.0) + envSpec(reflect(-V, N), rough) * Fv * 0.5) * (0.4 + 0.6 * uDay);
+  col += alb * sun * vFin * 0.7 * clamp(-NoL, 0.0, 1.0);                  // sunlight through thin fins
+  col += alb * sun * caustic(vWorld) * clamp(N.y, 0.0, 1.0) * uCaus;
+  // along the view ray the water absorbs the colour (red first) and replaces it with the water behind
+  vec3 T = exp(-uDist * vec3(1.8, 0.85, 0.65));
+  col = shoulder(col) * T + lin(texture(uBg, vWorld / vec2(uW, uH)).rgb) * (1.0 - T);
+  o = vec4(srgb(col) * tex.a, tex.a);
+}`;
+
+/* ---------- reef relight ---------- */
+const FGL_QUAD_VS = `#version 300 es
+in vec2 aPos; out vec2 vUV;
+void main() { vUV = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+// separable gaussian; the first pass turns the painting into (alpha, luminance·alpha)
+const FGL_BLUR_FS = `#version 300 es
+precision highp float;
+in vec2 vUV; uniform sampler2D uSrc; uniform vec2 uStep; uniform float uLod, uFirst;
+out vec4 o;
+vec4 fetch(vec2 uv) { vec4 c = textureLod(uSrc, uv, uLod); return uFirst > 0.5 ? vec4(c.a, dot(c.rgb, vec3(0.3, 0.59, 0.11)) * c.a, 0.0, 1.0) : c; }
+void main() {
+  vec4 s = vec4(0.0); float ws = 0.0;
+  for (int i = -6; i <= 6; i++) { float w = exp(-float(i * i) / 18.0); s += fetch(vUV + uStep * float(i)) * w; ws += w; }
+  o = s / ws;
+}`;
+
+const FGL_RELIT_FS = `#version 300 es
+precision highp float;
+in vec2 vUV;
+uniform sampler2D uAlb, uS, uM, uL, uSand;
+uniform vec2 uPx; uniform vec4 uGeo;   // W, H, bandTop, U (CSS px)
+uniform float uSunX, uRelief, uPXr, uMask;
+out vec4 o;
+${GLSL_NOISE}
+// height: rounded silhouettes at three scales + the painting's own light/dark detail
+float hgt(vec2 uv) {
+  vec4 s = texture(uS, uv), m = texture(uM, uv), l = texture(uL, uv);
+  return 0.6 * l.x + 0.3 * m.x + 0.1 * s.x + 0.5 * (s.y - m.y);
+}
+// gradient of value noise (height per U, y down)
+vec2 ngrad(vec2 q, float f) { float d = 0.3 / f, n = vnoise(q * f); return vec2(vnoise((q + vec2(d, 0.0)) * f) - n, vnoise((q + vec2(0.0, d)) * f) - n) / d; }
+float lit(vec3 N, vec3 L) { return 0.35 + 0.25 * N.y + 1.25 * clamp((dot(N, L) + 0.15) / 1.15, 0.0, 1.0); }
+void main() {
+  vec4 alb = texture(uAlb, vUV);
+  if (alb.a < 0.004) { o = vec4(0.0); return; }
+  vec2 p = vec2(vUV.x * uGeo.x, uGeo.z + (1.0 - vUV.y) * (uGeo.y - uGeo.z)), q = p / uGeo.w;
+  float K = 110.0 * uRelief * uPXr;
+  float gx = (hgt(vUV + vec2(uPx.x, 0.0)) - hgt(vUV - vec2(uPx.x, 0.0))) * 0.5 * K;
+  float gy = (hgt(vUV + vec2(0.0, uPx.y)) - hgt(vUV - vec2(0.0, uPx.y))) * 0.5 * K;   // uv.y points up
+  float sand = texture(uSand, vUV).r;   // r = open sand, g = rock
+  vec3 floorN = normalize(vec3(0.0, 1.0, 0.55));
+  vec3 N0 = mix(vec3(0.0, 0.0, 1.0), floorN, sand);
+  vec3 N = mix(normalize(vec3(-gx, -gy, 1.0)), floorN, sand);
+  // micro relief (slopes, y down): pitted rock and coral; sand ripples that widen toward the glass, and grain
+  vec2 mg = (ngrad(q, 5.0) * 0.06 + ngrad(q, 17.0) * 0.02) * uRelief * (1.0 - sand);
+  if (sand > 0.0) {
+    float t = clamp((p.y - uGeo.y * 0.84) / (uGeo.y * 0.16), 0.0, 1.0), sp = mix(0.3, 1.5, t);
+    float ph = 6.2832 * (q.y + 0.35 * sin(q.x * 0.9) + 0.8 * vnoise(q * 0.35)) / sp;
+    mg += sand * (vec2(0.0, cos(ph) * 6.2832 / sp * 0.08 * sp) + ngrad(q, 9.0) * 0.03);
+  }
+  N = normalize(N + vec3(-mg.x, mg.y, 0.0));
+  vec3 L = normalize(vec3(uSunX - p.x, p.y + 0.15 * uGeo.y, 0.45 * uGeo.y));
+  if (uMask > 0.5) {
+    // where caustics can land: surfaces facing up toward the light, not the dark of the cave
+    float m = alb.a * smoothstep(-0.05, 0.6, N.y) * smoothstep(0.04, 0.16, dot(alb.rgb, vec3(0.3, 0.59, 0.11)));
+    o = vec4(m, m, m, m); return;
+  }
+  float f = clamp(lit(N, L) / lit(N0, L), 0.3, 2.0);
+  // sunlight loses red first on its way down, so the direct part of the light is bluer near the floor
+  vec3 sunT = mix(vec3(1.0), exp(-clamp(p.y / uGeo.y, 0.0, 1.0) * vec3(0.45, 0.12, 0.05)), clamp(f - 0.5, 0.0, 1.0));
+  // crevices: where the painting is darker than its surroundings, deepen it
+  float cav = clamp((texture(uM, vUV).y - texture(uS, vUV).y) * 4.0, 0.0, 1.0) * (1.0 - sand);
+  // sand: soft shadow from rocks between it and the sun, and darkening at their feet
+  float sh = 0.0;
+  if (sand > 0.0) {
+    vec2 dir = normalize(vec2((uSunX - p.x) / uGeo.x * 2.0, 1.0));
+    for (int i = 1; i <= 6; i++) sh += textureLod(uSand, vUV + dir * float(i) * 0.014, 2.0).g;
+    sh = sand * clamp(sh / 6.0 * 0.9 + textureLod(uSand, vUV, 4.0).g * 0.35, 0.0, 0.55);
+  }
+  float vary = 1.0 + (0.1 * (vnoise(q * 0.55) - 0.5) + 0.06 * (vnoise(q * 3.3) - 0.5)) * uRelief;
+  float sheen = pow(max(dot(N, normalize(L + vec3(0.0, 0.0, 1.0))), 0.0), 24.0) * 0.05 * (1.0 - sand) * uRelief;   // faint, wet
+  vec3 col = srgb(lin(alb.rgb) * vary * f * sunT * (1.0 - 0.4 * cav) * (1.0 - sh) + sheen * f);
+  o = vec4(col * alb.a, alb.a);
+}`;
+
+function fglProgram(gl, vs, fs, attrs) {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  attrs.forEach((a, i) => gl.bindAttribLocation(p, i, a));
+  gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  for (let i = 0, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i < n; i++) { const name = gl.getActiveUniform(p, i).name; u[name] = gl.getUniformLocation(p, name); }
+  return { p, u };
+}
+
+function fglInit() {
+  const c = mk(2048, 512);
+  const gl = c.getContext('webgl2', { antialias: true, premultipliedAlpha: true, alpha: true, depth: true });
+  if (!gl) return;
+  try {
+    FGL.fish = fglProgram(gl, FGL_FISH_VS, FGL_FISH_FS, ['aPos', 'aNrm', 'aUV', 'aFin']);
+    FGL.blur = fglProgram(gl, FGL_QUAD_VS, FGL_BLUR_FS, ['aPos']);
+    FGL.relit = fglProgram(gl, FGL_QUAD_VS, FGL_RELIT_FS, ['aPos']);
+  } catch (err) { console.warn('[reefglass] 3D materials disabled:', err); return; }
+  FGL.canvas = c; FGL.gl = gl;
+  FGL.hdr = !!gl.getExtension('EXT_color_buffer_float');
+  FGL.quad = gl.createVertexArray(); gl.bindVertexArray(FGL.quad);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  FGL.dyn = { vao: gl.createVertexArray(), vb: gl.createBuffer(), ib: gl.createBuffer() };
+  fglAttribs(FGL.dyn.vao, FGL.dyn.vb, FGL.dyn.ib);
+  gl.bindVertexArray(null);
+  const w = mk(1, 1), wg = w.getContext('2d'); wg.fillStyle = '#fff'; wg.fillRect(0, 0, 1, 1);
+  FGL.white = { t: fglTexture(w), texel: [1, 1] };
+  c.addEventListener('webglcontextlost', (e) => { e.preventDefault(); FGL.on = false; FGL.gl = null; });
+  FGL.on = FGL.want;
+  for (const sp of Object.values(SPECIES)) if (sp.gl) fglBuildSpecies(sp);
+}
+
+function fglTexture(canvas, flip = false) {
+  const gl = FGL.gl, t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flip);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+// interleaved [x y z nx ny nz u v fin] vertices
+function fglAttribs(vao, vb, ib) {
+  const gl = FGL.gl; gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+  [3, 3, 2, 1].reduce((off, n, i) => { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, n, gl.FLOAT, false, 36, off * 4); return off + n; }, 0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+}
+function fglVAO(verts, idx) {
+  const gl = FGL.gl, vao = gl.createVertexArray(), vb = gl.createBuffer(), ib = gl.createBuffer();
+  fglAttribs(vao, vb, ib);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+  gl.bindVertexArray(null); return vao;
+}
+// build once per key (visitors are built the first time they appear)
+function fglCached(key, make) { return FGL.cache[key] || (FGL.cache[key] = make()); }
+
+/* Inflate a painting into a two-sided mesh.
+   o: { paint(g) in model units, x0, x1, y0, y1 (bounds), thick, NX, mat }
+   The body is the outline passed to shade() while painting — anything else painted is a thin fin — or,
+   when the painter never calls shade(), the whole painted silhouette. Each point is rounded across the
+   narrower of its vertical and horizontal runs through the body, so a long fish is round top-to-bottom
+   and an upright tail is round side-to-side. */
+function fglMesh(o) {
+  const L = o.L ?? 640, thick = o.thick ?? 0.45, FIN = 0.004, { x0, x1, y0, y1 } = o;
+  const tw = Math.ceil((x1 - x0) * L), th = Math.ceil((y1 - y0) * L);
+  const tc = mk(tw, th), g = tc.getContext('2d', { willReadFrequently: true });
+  FLAT_PAINT = {};
+  g.setTransform(L, 0, 0, L, -x0 * L, -y0 * L); o.paint(g);
+  const body = FLAT_PAINT.body, eye = FLAT_PAINT.eyes && FLAT_PAINT.eyes[0]; FLAT_PAINT = null;
+  const alpha = g.getImageData(0, 0, tw, th).data;
+
+  const NX = o.NX ?? 96, NY = Math.max(8, Math.round(NX * (y1 - y0) / (x1 - x0))), dx = (x1 - x0) / NX, dy = (y1 - y0) / NY;
+  const R = 3, MW = NX * R + 1, MH = NY * R + 1, sx = dx / R, sy = dy / R;
+  const bm = mk(MW, MH), bg = bm.getContext('2d', { willReadFrequently: true });
+  if (body) { bg.setTransform(1 / sx, 0, 0, 1 / sy, 0.5 - x0 / sx, 0.5 - y0 / sy); bg.fill(body); }
+  else bg.drawImage(tc, -0.5 * tw / (MW - 1), -0.5 * th / (MH - 1), tw + tw / (MW - 1), th + th / (MH - 1), 0, 0, MW, MH);
+  const md = bg.getImageData(0, 0, MW, MH).data, IN = new Uint8Array(MW * MH);
+  for (let i = 0; i < IN.length; i++) IN[i] = md[i * 4 + 3] > 127 ? 1 : 0;
+  // vertical and horizontal runs through every inside sample
+  const cA = new Int16Array(MW * MH), cB = new Int16Array(MW * MH), rA = new Int16Array(MW * MH), rB = new Int16Array(MW * MH);
+  for (let c = 0; c < MW; c++) for (let r = 0; r < MH;) { if (!IN[r * MW + c]) { r++; continue; } let e = r; while (e + 1 < MH && IN[(e + 1) * MW + c]) e++; for (let q = r; q <= e; q++) { cA[q * MW + c] = r; cB[q * MW + c] = e; } r = e + 1; }
+  for (let r = 0; r < MH; r++) for (let c = 0; c < MW;) { if (!IN[r * MW + c]) { c++; continue; } let e = c; while (e + 1 < MW && IN[r * MW + e + 1]) e++; for (let q = c; q <= e; q++) { rA[r * MW + q] = c; rB[r * MW + q] = e; } c = e + 1; }
+  // [half-thickness, analytic dh/dx or NaN, analytic dh/dy or NaN] at mask sample (c, r)
+  const H = (c, r) => {
+    const s = r * MW + c; if (!IN[s]) return null;
+    const hv = (cB[s] - cA[s] + 1) / 2, tv = (r - (cA[s] + cB[s]) / 2) / hv, hu = (rB[s] - rA[s] + 1) / 2, tu = (c - (rA[s] + rB[s]) / 2) / hu;
+    const qv = Math.sqrt(Math.max(0, 1 - tv * tv)), qu = Math.sqrt(Math.max(0, 1 - tu * tu));
+    return hv * sy * qv <= hu * sx * qu ? [thick * hv * sy * qv, NaN, -thick * tv / Math.max(0.08, qv)] : [thick * hu * sx * qu, -thick * tu / Math.max(0.08, qu), NaN];
+  };
+  const N1 = NY + 1, hz = new Float32Array((NX + 1) * N1), an = [], fin = new Float32Array((NX + 1) * N1);
+  for (let i = 0; i <= NX; i++) for (let j = 0; j <= NY; j++) {
+    const h = H(i * R, j * R), k = i * N1 + j;
+    hz[k] = h ? Math.max(FIN, h[0]) : FIN; an[k] = h; fin[k] = h ? 0 : body ? 1 : 0;
+  }
+  const verts = [], idx = [];
+  for (const side of [1, -1]) for (let i = 0; i <= NX; i++) for (let j = 0; j <= NY; j++) {
+    const k = i * N1 + j, h = an[k];
+    let gx = 0, gy = 0;
+    if (h) {
+      gx = isNaN(h[1]) ? (hz[Math.min(NX, i + 1) * N1 + j] - hz[Math.max(0, i - 1) * N1 + j]) / (2 * dx) : h[1];
+      gy = isNaN(h[2]) ? (hz[i * N1 + Math.min(NY, j + 1)] - hz[i * N1 + Math.max(0, j - 1)]) / (2 * dy) : h[2];
+    }
+    const nl = Math.hypot(gx, gy, 1);
+    verts.push(x0 + i * dx, y0 + j * dy, side * hz[k], -gx / nl, -gy / nl, side / nl, i / NX, j / NY, fin[k]);
+  }
+  // keep only cells with painted pixels; front sheet first, then back
+  const cellUsed = (i, j) => {
+    const px0 = Math.floor(i * dx * L) - 1, px1 = Math.ceil((i + 1) * dx * L) + 1, py0 = Math.floor(j * dy * L) - 1, py1 = Math.ceil((j + 1) * dy * L) + 1;
+    for (let py = Math.max(0, py0); py < Math.min(th, py1); py++) for (let px = Math.max(0, px0); px < Math.min(tw, px1); px++) if (alpha[(py * tw + px) * 4 + 3] > 2) return true;
+    return false;
+  };
+  const cells = [];
+  for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) if (cellUsed(i, j)) cells.push(i * N1 + j);
+  for (const off of [0, (NX + 1) * N1]) for (const a of cells) { const b = a + N1; idx.push(off + a, off + b, off + a + 1, off + a + 1, off + b, off + b + 1); }
+  const hAt = (x, y) => hz[clamp(Math.round((x - x0) / dx), 0, NX) * N1 + clamp(Math.round((y - y0) / dy), 0, NY)];
+  return { vao: fglVAO(verts, idx), tex: fglTexture(tc), texel: [1 / tw, 1 / th], half: cells.length * 6, mat: o.mat || {}, hAt, eye,
+    hw: Math.max(-x0, x1), hh: Math.max(-y0, y1) };
+}
+
+// a flat painted sheet, e.g. a fin: pivot (ox, oy) as a fraction of its w × h box
+function fglQuad(o) {
+  const L = o.L ?? 640, c = mk(Math.ceil(o.w * L), Math.ceil(o.h * L)), g = c.getContext('2d');
+  FLAT_PAINT = {}; g.setTransform(L, 0, 0, L, o.ox * c.width, o.oy * c.height); o.paint(g); FLAT_PAINT = null;
+  const xa = -o.ox * o.w, xb = (1 - o.ox) * o.w, ya = -o.oy * o.h, yb = (1 - o.oy) * o.h;
+  return { vao: fglVAO([xa, ya, 0, 0, 0, 1, 0, 0, 1, xb, ya, 0, 0, 0, 1, 1, 0, 1, xa, yb, 0, 0, 0, 1, 0, 1, 1, xb, yb, 0, 0, 0, 1, 1, 1, 1], [0, 1, 2, 2, 1, 3]),
+    tex: fglTexture(c), texel: [1 / c.width, 1 / c.height], count: 6, mat: o.mat || {}, len: Math.hypot(o.w, o.h) };
+}
+
+// an ellipsoid centred at (cx, cy), textured by longitude/latitude
+function fglEllipsoid(rx, ry, rz, o = {}) {
+  const V = [], I = [], NU = 28, NV = 16, cx = o.cx || 0, cy = o.cy || 0, tex = o.tex || FGL.white;
+  for (let j = 0; j <= NV; j++) {
+    const th = (j / NV) * Math.PI;
+    for (let i = 0; i <= NU; i++) {
+      const ph = (i / NU) * TAU, ex = Math.sin(th) * Math.cos(ph), ey = -Math.cos(th), ez = Math.sin(th) * Math.sin(ph);
+      const n = [ex / rx, ey / ry, ez / rz], l = Math.hypot(...n);
+      V.push(cx + ex * rx, cy + ey * ry, ez * rz, n[0] / l, n[1] / l, n[2] / l, i / NU, j / NV, 0);
+    }
+  }
+  for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) { const a = j * (NU + 1) + i; I.push(a, a + NU + 1, a + 1, a + 1, a + NU + 1, a + NU + 2); }
+  return { vao: fglVAO(V, I), tex: tex.t, texel: tex.texel, count: I.length, mat: o.mat || {} };
+}
+
+// tubes along polylines in the xy plane: [{ pts: [[x, y, z]...], r: [radius...] }] -> [verts, indices]
+function fglTubes(tubes, NR = 10) {
+  const V = [], I = [];
+  for (const tb of tubes) {
+    const n = tb.pts.length, base = V.length / 9;
+    for (let s = 0; s < n; s++) {
+      const p = tb.pts[s], q = tb.pts[Math.min(n - 1, s + 1)], o = tb.pts[Math.max(0, s - 1)];
+      let tx = q[0] - o[0], ty = q[1] - o[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      for (let r = 0; r <= NR; r++) {
+        const ph = (r / NR) * TAU, c = Math.cos(ph), sn = Math.sin(ph), nx = -ty * c, ny = tx * c;
+        V.push(p[0] + nx * tb.r[s], p[1] + ny * tb.r[s], (p[2] || 0) + sn * tb.r[s], nx, ny, sn, s / (n - 1), r / NR, 0);
+      }
+    }
+    for (let s = 0; s < n - 1; s++) for (let r = 0; r < NR; r++) { const a = base + s * (NR + 1) + r, b = a + NR + 1; I.push(a, b, a + 1, a + 1, b, b + 1); }
+  }
+  return [V, I];
+}
+// geometry rebuilt every frame (octopus arms, diver limbs) goes through one shared buffer
+function fglDynamic([V, I], o = {}) {
+  const gl = FGL.gl, d = FGL.dyn, tex = o.tex || FGL.white;
+  gl.bindVertexArray(d.vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, d.vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(V), gl.DYNAMIC_DRAW);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(I), gl.DYNAMIC_DRAW);
+  gl.bindVertexArray(null);
+  return { vao: d.vao, tex: tex.t, texel: tex.texel, count: I.length, mat: o.mat || {} };
+}
+
+/* ---------- drawing a model inside its tile ---------- */
+function fglPose(p = {}) {
+  const gl = FGL.gl, u = FGL.fish.u, f = p.flap || [0, 0, 0];
+  gl.uniform1f(u.uPitch, p.pitch || 0); gl.uniform1f(u.uYaw, p.yaw || 0); gl.uniform1f(u.uRoll, p.roll || 0); gl.uniform1f(u.uMirror, p.mirror || 1);
+  gl.uniform2f(u.uGulp, p.gx || 1, p.gy || 1); gl.uniform1f(u.uPhase, p.phase || 0); gl.uniform1f(u.uAmp, p.amp || 0);
+  gl.uniform1f(u.uAxis, p.axis || 0); gl.uniform1f(u.uFinAmp, p.finAmp || 0); gl.uniform3f(u.uFlap, f[0], f[1], f[2]);
+}
+// draw a mesh as the body (part = null) or as a rigid part { x, y, z, tilt, splay, roll } on a hinge
+function fglDraw(m, part = null, nearFirst = true, mat = m.mat) {
+  const gl = FGL.gl, u = FGL.fish.u, t = mat.tint || [1, 1, 1];
+  if (part) { gl.uniform4f(u.uPart, part.x || 0, part.y || 0, part.z || 0, 1); gl.uniform3f(u.uPartRot, part.tilt || 0, part.splay || 0, part.roll || 0); }
+  else gl.uniform4f(u.uPart, 0, 0, 0, 0);
+  gl.uniform4f(u.uMat, mat.rough ?? 0.35, mat.finRough ?? 0.6, mat.scale ?? 0, mat.iri ?? 0); gl.uniform1f(u.uSSS, mat.sss ?? 0.5);
+  gl.uniform3f(u.uTint, t[0], t[1], t[2]); gl.uniform2f(u.uTexel, m.texel[0], m.texel[1]);
+  if (m.eye && !part) gl.uniform3f(u.uEye, m.eye[0], m.eye[1], m.eye[2]); else gl.uniform3f(u.uEye, 0, 0, 0);
+  gl.bindTexture(gl.TEXTURE_2D, m.tex); gl.bindVertexArray(m.vao);
+  if (m.half) {   // two-sided mesh: the sheet facing us claims depth first
+    gl.drawElements(gl.TRIANGLES, m.half, gl.UNSIGNED_SHORT, nearFirst ? 0 : m.half * 2);
+    gl.drawElements(gl.TRIANGLES, m.half, gl.UNSIGNED_SHORT, nearFirst ? m.half * 2 : 0);
+  } else gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_SHORT, 0);
+}
+
+/* Render every visible 3D model into its own tile; the owner's draw() blits the tile later this frame.
+   Entities expose glJobs() -> [{ obj, x, y, z, k (CSS px per model unit), hw, hh (half extents, model units), render() }]. */
+function fglPrepare(list, t) {
+  for (const o of FGL.tiled) o.glTile = null;
+  FGL.tiled.length = 0;
+  if (!FGL.on) return;
+  const jobs = [];
+  for (const e of list) {
+    const js = e.glJobs && e.glJobs(t);
+    if (js) for (const j of js) {
+      if (!j || j.x + j.hw * j.k < 0 || j.x - j.hw * j.k > W || j.y + j.hh * j.k < 0 || j.y - j.hh * j.k > H) continue;
+      const pw = 2 * j.hw * j.k * PX, ph = 2 * j.hh * j.k * PX;
+      // very large visitors render at reduced resolution; far ones too, which softens them like depth of field
+      j.s = Math.min(1, 2040 / pw, 2040 / ph) * lerp(1, 0.45, smooth((j.z - 0.45) / 0.4)) * [1, 0.85, 0.7, 0.55][PERF.steps || 0];
+      j.tw = Math.ceil(pw * j.s) + 2; j.th = Math.ceil(ph * j.s) + 2; jobs.push(j);
+    }
+  }
+  if (!jobs.length) return;
+  // shelf-pack, tallest first; grow the canvas when needed
+  jobs.sort((a, b) => b.th - a.th);
+  const gl = FGL.gl, cv2 = FGL.canvas, CW = cv2.width;
+  let x = 0, y = 0, rowH = 0;
+  for (const j of jobs) { if (x + j.tw > CW) { x = 0; y += rowH + 2; rowH = 0; } j.tx = x; j.ty = y; x += j.tw + 2; rowH = Math.max(rowH, j.th); }
+  const need = Math.min(4096, Math.ceil((y + rowH) / 256) * 256);
+  if (need > cv2.height) cv2.height = need;
+  const CH = cv2.height, u = FGL.fish.u;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, CW, CH); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(FGL.fish.p);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, FGL.bg); gl.uniform1i(u.uBg, 1);
+  gl.activeTexture(gl.TEXTURE0); gl.uniform1i(u.uTex, 0);
+  gl.uniform1f(u.uTime, t); gl.uniform1f(u.uU, U); gl.uniform1f(u.uW, W); gl.uniform1f(u.uH, H);
+  gl.uniform1f(u.uSunX, ENV.sunX); gl.uniform1f(u.uDay, TOD.day); gl.uniform1f(u.uBump, 0.5);
+  const rays = (ENV.rayNow || []).slice(0, 15), RA = new Float32Array(60), RK = new Float32Array(15);
+  rays.forEach((q, i) => { RA.set([q.x, q.ang, q.r.w, q.r.len], i * 4); RK[i] = q.aDay + q.aNight * 0.5; });
+  gl.uniform4fv(u['uRay[0]'], RA); gl.uniform1fv(u['uRayA[0]'], RK); gl.uniform1i(u.uRayN, rays.length);
+  for (const j of jobs) {
+    if (j.ty + j.th > CH) continue;                  // out of atlas room: this one falls back to its 2D drawing
+    const fog = depthFog(j.z);
+    gl.viewport(j.tx, CH - j.ty - j.th, j.tw, j.th);
+    gl.uniform2f(u.uHalf, j.tw / 2, j.th / 2); gl.uniform1f(u.uScale, j.k * PX * j.s); gl.uniform1f(u.uPX, PX * j.s);
+    gl.uniform1f(u.uDepth, 1 / Math.max(j.tw, j.th)); gl.uniform2f(u.uFish, j.x, j.y);
+    gl.uniform1f(u.uDist, j.z); gl.uniform1f(u.uCaus, 0.45 * TOD.day * (1 - fog));
+    j.render();
+    j.obj.glTile = [j.tx, j.ty, j.tw, j.th, j.s, j.x, j.y]; FGL.tiled.push(j.obj);
+  }
+  gl.bindVertexArray(null);
+}
+
+function fglBlit(g, o) {
+  const [tx, ty, tw, th, s, x, y] = o.glTile, w = tw / (PX * s), h = th / (PX * s);
+  g.drawImage(FGL.canvas, tx, ty, tw, th, x - w / 2, y - h / 2, w, h);
+}
+
+/* ---------- fish ---------- */
+function fglBuildSpecies(sp) {
+  const mat = sp.gl, x0 = sp.tailAt[0] - sp.tailBox[0], x1 = sp.box[0] / 2, ym = Math.max(sp.box[1], sp.tailBox[1]) / 2;
+  const body = fglMesh({ x0, x1, y0: -ym, y1: ym, thick: mat.thick, NX: sp.len < 5 ? 64 : sp.len < 9 ? 96 : 120, mat,
+    paint: (g) => { g.save(); g.translate(sp.tailAt[0], sp.tailAt[1]); sp.paintTail(g); g.restore(); sp.paintBody(g); } });
+  const m = sp.glMesh = { body, hw: body.hw, hh: body.hh };
+  if (sp.paintPec) {
+    m.pec = fglQuad({ paint: sp.paintPec, w: sp.pecBox[0], h: sp.pecBox[1], ox: 1, oy: 0.5, mat });
+    m.pecZ = body.hAt(sp.pecAt[0], sp.pecAt[1]) + 0.006;
+    m.hw = Math.max(m.hw, Math.abs(sp.pecAt[0]) + m.pec.len); m.hh = Math.max(m.hh, Math.abs(sp.pecAt[1]) + m.pec.len);
+  }
+}
+
+Fish.prototype.glJobs = function (t) {
+  const sp = this.sp, m = sp.glMesh;
+  if (!m || this.inflate > 0.98) return null;
+  const k = this.size * U * depthScale(this.z), gq = 1 + this.gulp * 0.12;
+  const yaw = -Math.acos(clamp(this.face, -1, 1)) + 0.22 * Math.sin(this.age * 0.35 + this.seed) * Math.abs(this.face);
+  const ta = sp.swim.tailAmp * clamp(0.55 + 0.5 * this.speed / (this.cruise() + 1), 0.4, 1.3);
+  // bank into turns (the yaw rate), plus a slow idle roll
+  const yr = this.glYaw === undefined ? 0 : clamp((yaw - this.glYaw) * 60, -4, 4); this.glYaw = yaw;
+  this.glRoll = ease(this.glRoll || 0, clamp(yr * 0.12, -0.45, 0.45) + 0.06 * Math.sin(this.age * 0.8 + this.seed), 4, 1 / 60);
+  const hw = m.hw * gq, hh = m.hh + hw * Math.abs(Math.sin(this.pitch)) + 0.1;
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k, hw, hh, render: () => {
+    fglPose({ pitch: this.pitch, yaw, roll: this.glRoll, gx: gq, gy: 1 - this.gulp * 0.06, phase: this.phase, amp: 0.22 * ta, finAmp: 0.025 });
+    const near = Math.cos(yaw) >= 0 ? 1 : -1, ph = this.pecPh;
+    const pec = (side) => m.pec && fglDraw(m.pec, { x: sp.pecAt[0], y: sp.pecAt[1], z: m.pecZ * side, tilt: -(sp.pecAng + 0.12 * Math.sin(ph)), splay: (0.3 + 0.6 * (0.5 + 0.5 * Math.sin(ph))) * side });
+    pec(-near); fglDraw(m.body, null, near > 0); pec(near);
+  } }];
+};
+
+/* ---------- seahorse ---------- */
+Seahorse.prototype.glJobs = function () {
+  const P = this.pose(); if (!P) return null;
+  const m = fglCached('seahorse', () => {
+    const mat = { thick: 0.6, rough: 0.5, sss: 0.4 };
+    const body = fglMesh({ paint: paintSeahorse, x0: -0.38, x1: 0.42, y0: -1.1, y1: 0.08, thick: mat.thick, NX: 64, mat });
+    const fin = fglQuad({ paint: paintSeahorseFin, w: 0.14, h: 0.14, ox: 1, oy: 0.5, mat });
+    return { body, fin, finZ: body.hAt(-0.12, -0.52) + 0.006 };
+  });
+  const t = this.age, yaw = 0.3 * Math.sin(t * 0.45);
+  return [{ obj: this, x: P.px, y: P.py, z: this.z, k: P.h, hw: 1.15, hh: 1.15, render: () => {
+    fglPose({ pitch: P.rot, yaw });
+    fglDraw(m.body, null, Math.cos(yaw) >= 0);
+    fglDraw(m.fin, { x: -0.12, y: -0.52, z: m.finZ, splay: 0.2 + 0.9 * Math.abs(Math.sin(t * 37)) });
+  } }];
+};
+
+/* Re-light the painted reef layers once per build. Returns { back, front } canvases, or null. */
+function fglRelight(back, front) {
+  const gl = FGL.gl; if (!gl) return null;
+  const lw = back.width, lh = back.height, cv2 = FGL.canvas;
+  const target = (w, h) => {
+    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, FGL.hdr ? gl.RGBA16F : gl.RGBA8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    return { t, fb, w, h };
+  };
+  const drop = (r) => { gl.deleteTexture(r.t); gl.deleteFramebuffer(r.fb); };
+  const bu = FGL.blur.u;
+  const blur = (src, scale, stepPx) => {
+    const w = Math.max(1, Math.round(lw / scale)), h = Math.max(1, Math.round(lh / scale)), a = target(w, h), b = target(w, h);
+    gl.useProgram(FGL.blur.p); gl.uniform1i(bu.uSrc, 0); gl.activeTexture(gl.TEXTURE0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, a.fb); gl.viewport(0, 0, w, h); gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.uniform1f(bu.uLod, Math.log2(scale)); gl.uniform1f(bu.uFirst, 1); gl.uniform2f(bu.uStep, stepPx / w, 0); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, b.fb); gl.bindTexture(gl.TEXTURE_2D, a.t);
+    gl.uniform1f(bu.uLod, 0); gl.uniform1f(bu.uFirst, 0); gl.uniform2f(bu.uStep, 0, stepPx / h); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    drop(a); return b;
+  };
+  // open sand (not rock) as a material mask for the front layer
+  const [sm, sg] = layerCanvas(0.5);
+  sg.fillStyle = '#f00'; sg.beginPath(); sg.moveTo(-5, H + 5);
+  for (let x = -4; x <= W + 4; x += 4) sg.lineTo(x, sandY(x));
+  sg.lineTo(W + 5, H + 5); sg.fill();
+  sg.fillStyle = '#0f0'; for (const r of REEF.rocks) sg.fill(r.path);
+  const none = mk(1, 1);
+
+  // canvas rows, top to bottom: back colour, front colour, back caustic mask, front caustic mask
+  cv2.width = lw; cv2.height = lh * 4;
+  gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND); gl.bindVertexArray(FGL.quad);
+  const ru = FGL.relit.u, layers = [[back, none, 0.5, 0], [front, sm, 1, 1]];
+  for (const [src, mask, relief, row] of layers) {
+    const alb = fglTexture(src, true), sand = fglTexture(mask, true);
+    const S = blur(alb, 1, 0.5 * PX), M = blur(alb, 2, 1.35 * PX), Lg = blur(alb, 8, 1.7 * PX);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(FGL.relit.p);
+    [alb, S.t, M.t, Lg.t, sand].forEach((t, i) => { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, t); });
+    ['uAlb', 'uS', 'uM', 'uL', 'uSand'].forEach((n, i) => gl.uniform1i(ru[n], i));
+    gl.uniform2f(ru.uPx, 1 / lw, 1 / lh); gl.uniform4f(ru.uGeo, W, H, REEF.bandTop, U);
+    gl.uniform1f(ru.uSunX, ENV.sunX); gl.uniform1f(ru.uRelief, relief); gl.uniform1f(ru.uPXr, PX);
+    for (const [mode, r] of [[0, row], [1, row + 2]]) {
+      gl.viewport(0, (3 - r) * lh, lw, lh); gl.uniform1f(ru.uMask, mode); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    for (const r of [S, M, Lg]) drop(r);
+    gl.deleteTexture(alb); gl.deleteTexture(sand); gl.activeTexture(gl.TEXTURE0);
+  }
+  gl.bindVertexArray(null);
+  const out = {};
+  for (const [k, sy] of [['back', 0], ['front', lh]]) {
+    const c = mk(lw, lh), cg = c.getContext('2d');
+    if (k === 'back' && 'filter' in cg) cg.filter = `blur(${0.8 * PX}px)`;   // the far reef slightly out of focus
+    cg.drawImage(cv2, 0, sy, lw, lh, 0, 0, lw, lh); out[k] = c;
+  }
+  const mc = mk(lw / 2, lh / 2), mg = mc.getContext('2d');
+  mg.drawImage(cv2, 0, lh * 2, lw, lh, 0, 0, mc.width, mc.height); mg.drawImage(cv2, 0, lh * 3, lw, lh, 0, 0, mc.width, mc.height);
+  out.mask = mc;
+  // the painted water, for models to fade into
+  if (FGL.bg) gl.deleteTexture(FGL.bg);
+  FGL.bg = fglTexture(ENV.bg);
+  cv2.width = 2048; cv2.height = 512;
+  return out;
+}
+
+function reefLayer(k) { return FGL.on && REEF.lit ? REEF.lit[k] : REEF[k]; }
+
+function fglToggle(on = !FGL.want) { FGL.want = on; FGL.on = on && !!FGL.gl; return FGL.on; }
 
 /* =====================================================================
    Special visitors, part 1: framework, turtle, manta, shark, whale shark
@@ -2352,6 +3059,7 @@ class Turtle extends Crosser {
   constructor(info) { super(info, Math.min(U * rand(20, 24), W * 0.42), 4.2, rand(0.22, 0.36), rand(0.26, 0.5)); this.stroke = rand(TAU); }
   update(dt) { this.stroke += dt * TAU / 3.4; this.speedU = 3.2 + 2.2 * Math.max(0, Math.sin(this.stroke)); LIFE.danger.push({ x: this.x, y: this.y, r: this.k * 0.8, scare: false }); return this.step(dt, 0.03, 0.25); }
   draw(g) {
+    if (this.glTile) return fglBlit(g, this);
     const L = 260, k = this.k, fog = depthFog(this.z);
     const shell = vspr('tShell', 1.08, 0.74, L, paintTurtleShell), head = vspr('tHead', 0.38, 0.24, L, paintTurtleHead, 0, 0.5);
     const ff = vspr('tFF', 0.72, 0.24, L, paintTurtleFlipper(0.7, 0.2), 1, 0.5), rf = vspr('tRF', 0.3, 0.16, L, paintTurtleFlipper(0.28, 0.12), 1, 0.5);
@@ -2367,6 +3075,35 @@ class Turtle extends Crosser {
 }
 
 /* ---------------- Reef manta (seen from below) ---------------- */
+/* the manta seen from below, in body lengths; flap sets the wing stroke */
+function paintManta(g, flap, spots) {
+  const c = Math.cos(flap), sn = Math.sin(flap), tipY = 0.5 * (0.8 + 0.2 * c), tipX = -0.13 + 0.035 * sn, lc = 0.3 + 0.05 * c;
+  g.strokeStyle = 'rgba(28,34,42,0.85)'; g.lineCap = 'round';
+  g.lineWidth = 0.008; g.beginPath(); g.moveTo(-0.24, 0); g.quadraticCurveTo(-0.4, Math.sin(flap * 2) * 0.02, -0.58, Math.sin(flap) * 0.035); g.stroke();
+  const p = new Path2D(); p.moveTo(0.2, -0.075);
+  p.bezierCurveTo(0.17, -lc * 0.8, 0.02, -tipY * 0.95, tipX, -tipY);
+  p.bezierCurveTo(-0.06, -tipY * 0.62, -0.1, -0.2, -0.17, -0.1);
+  p.quadraticCurveTo(-0.22, -0.075, -0.25, -0.03); p.lineTo(-0.25, 0.03); p.quadraticCurveTo(-0.22, 0.075, -0.17, 0.1);
+  p.bezierCurveTo(-0.1, 0.2, -0.06, tipY * 0.62, tipX, tipY);
+  p.bezierCurveTo(0.02, tipY * 0.95, 0.17, lc * 0.8, 0.2, 0.075); p.closePath();
+  const gr = g.createRadialGradient(0.05, 0, 0.02, 0.02, 0, 0.52);
+  gr.addColorStop(0, '#e6ecee'); gr.addColorStop(0.3, '#cfd8dc'); gr.addColorStop(0.62, '#7c8892'); gr.addColorStop(1, '#262f38');
+  g.fillStyle = gr; g.fill(p);
+  g.save(); g.clip(p);
+  g.fillStyle = 'rgba(30,36,44,0.55)'; for (const [x, y, r] of spots) { g.beginPath(); g.arc(x, y * 0.8, r, 0, TAU); g.fill(); }
+  g.strokeStyle = 'rgba(40,48,58,0.65)'; g.lineWidth = 0.006;
+  for (let i = 0; i < 5; i++) { const x = 0.13 - i * 0.022; for (const s2 of [-1, 1]) { g.beginPath(); g.moveTo(x, s2 * 0.045); g.quadraticCurveTo(x - 0.012, s2 * 0.07, x - 0.002, s2 * 0.095); g.stroke(); } }
+  g.restore();
+  for (const s2 of [-1, 1]) {
+    g.save(); g.translate(0.215, s2 * 0.068); g.rotate(s2 * -0.25 + Math.sin(flap * 1.3) * 0.08 * s2);
+    g.fillStyle = '#48535d'; g.beginPath(); g.ellipse(0.035, 0, 0.055, 0.02, 0, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(210,220,226,0.55)'; g.beginPath(); g.ellipse(0.03, s2 * 0.006, 0.04, 0.008, 0, 0, TAU); g.fill();
+    g.restore();
+  }
+  g.fillStyle = '#161c22'; g.fillRect(0.198, -0.052, 0.014, 0.104);
+  g.fillStyle = 'rgba(40,46,52,0.9)'; for (const s2 of [-1, 1]) { g.beginPath(); g.ellipse(-0.235, s2 * 0.045, 0.03, 0.012, s2 * 0.4, 0, TAU); g.fill(); }
+  return p;
+}
 class Manta extends Crosser {
   constructor(info) {
     super(info, Math.min(U * 36, W * 0.62), 6, rand(0.3, 0.42), rand(0.17, 0.3)); this.flap = rand(TAU);
@@ -2374,33 +3111,10 @@ class Manta extends Crosser {
   }
   update(dt) { this.flap += dt * TAU / 4.2; LIFE.danger.push({ x: this.x, y: this.y, r: this.k * 0.4, scare: false }); return this.step(dt, 0.025, 0.2); }
   draw(g) {
-    const S = this.k, fog = depthFog(this.z), c = Math.cos(this.flap), sn = Math.sin(this.flap);
-    const tipY = 0.5 * (0.8 + 0.2 * c), tipX = -0.13 + 0.035 * sn, lc = 0.3 + 0.05 * c;
+    if (this.glTile) return fglBlit(g, this);
+    const S = this.k, fog = depthFog(this.z);
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir * 0.5); g.scale(this.dir * S, S);
-    g.strokeStyle = 'rgba(28,34,42,0.85)'; g.lineCap = 'round';
-    g.lineWidth = 0.008; g.beginPath(); g.moveTo(-0.24, 0); g.quadraticCurveTo(-0.4, Math.sin(this.flap * 2) * 0.02, -0.58, Math.sin(this.flap) * 0.035); g.stroke();
-    const p = new Path2D(); p.moveTo(0.2, -0.075);
-    p.bezierCurveTo(0.17, -lc * 0.8, 0.02, -tipY * 0.95, tipX, -tipY);
-    p.bezierCurveTo(-0.06, -tipY * 0.62, -0.1, -0.2, -0.17, -0.1);
-    p.quadraticCurveTo(-0.22, -0.075, -0.25, -0.03); p.lineTo(-0.25, 0.03); p.quadraticCurveTo(-0.22, 0.075, -0.17, 0.1);
-    p.bezierCurveTo(-0.1, 0.2, -0.06, tipY * 0.62, tipX, tipY);
-    p.bezierCurveTo(0.02, tipY * 0.95, 0.17, lc * 0.8, 0.2, 0.075); p.closePath();
-    const gr = g.createRadialGradient(0.05, 0, 0.02, 0.02, 0, 0.52);
-    gr.addColorStop(0, '#e6ecee'); gr.addColorStop(0.3, '#cfd8dc'); gr.addColorStop(0.62, '#7c8892'); gr.addColorStop(1, '#262f38');
-    g.fillStyle = gr; g.fill(p);
-    g.save(); g.clip(p);
-    g.fillStyle = 'rgba(30,36,44,0.55)'; for (const [x, y, r] of this.spots) { g.beginPath(); g.arc(x, y * 0.8, r, 0, TAU); g.fill(); }
-    g.strokeStyle = 'rgba(40,48,58,0.65)'; g.lineWidth = 0.006;
-    for (let i = 0; i < 5; i++) { const x = 0.13 - i * 0.022; for (const s2 of [-1, 1]) { g.beginPath(); g.moveTo(x, s2 * 0.045); g.quadraticCurveTo(x - 0.012, s2 * 0.07, x - 0.002, s2 * 0.095); g.stroke(); } }
-    g.restore();
-    for (const s2 of [-1, 1]) {
-      g.save(); g.translate(0.215, s2 * 0.068); g.rotate(s2 * -0.25 + Math.sin(this.flap * 1.3) * 0.08 * s2);
-      g.fillStyle = '#48535d'; g.beginPath(); g.ellipse(0.035, 0, 0.055, 0.02, 0, 0, TAU); g.fill();
-      g.fillStyle = 'rgba(210,220,226,0.55)'; g.beginPath(); g.ellipse(0.03, s2 * 0.006, 0.04, 0.008, 0, 0, TAU); g.fill();
-      g.restore();
-    }
-    g.fillStyle = '#161c22'; g.fillRect(0.198, -0.052, 0.014, 0.104);
-    g.fillStyle = 'rgba(40,46,52,0.9)'; for (const s2 of [-1, 1]) { g.beginPath(); g.ellipse(-0.235, s2 * 0.045, 0.03, 0.012, s2 * 0.4, 0, TAU); g.fill(); }
+    const p = paintManta(g, this.flap, this.spots);
     if (fog > 0.02) { g.globalAlpha = fog; g.fillStyle = rgbStr(FOG_RGB); g.fill(p); g.globalAlpha = 1; }
     g.restore();
   }
@@ -2431,6 +3145,7 @@ class Shark extends Crosser {
   constructor(info) { super(info, U * rand(26, 32), 9, rand(0.28, 0.42), rand(0.3, 0.55)); this.ph2 = rand(TAU); }
   update(dt) { this.ph2 += dt * TAU * 0.8; LIFE.danger.push({ x: this.x + this.dir * this.k * 0.3, y: this.y, r: U * 42 }); return this.step(dt, 0.05, 0.22); }
   draw(g) {
+    if (this.glTile) return fglBlit(g, this);
     const L = 360, k = this.k, fog = depthFog(this.z), osc = Math.sin(this.ph2);
     const body = vspr('shBody', 1.08, 0.72, L, paintSharkBody), tail = vspr('shTail', 0.34, 0.52, L, paintSharkTail, 1, 0.52);
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir); g.scale(this.dir, 1);
@@ -2475,9 +3190,12 @@ class WhaleShark extends Crosser {
   draw(g) {
     const L = 520, k = this.k, fog = depthFog(this.z), osc = Math.sin(this.ph2);
     const body = vspr('wsBody', 1.06, 0.66, L, paintWhaleSharkBody), tail = vspr('wsTail', 0.26, 0.6, L, paintWhaleSharkTail, 1, 0.58);
+    if (this.glTile) fglBlit(g, this);
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir); g.scale(this.dir, 1);
-    g.save(); g.translate(-0.49 * k, 0); g.rotate(osc * 0.04); g.scale(Math.cos(osc * 0.55), 1); tail.draw(g, 0, 0, 0.26 * k, 0.6 * k, fog); g.restore();
-    body.draw(g, 0, 0, 1.06 * k, 0.66 * k, fog);
+    if (!this.glTile) {
+      g.save(); g.translate(-0.49 * k, 0); g.rotate(osc * 0.04); g.scale(Math.cos(osc * 0.55), 1); tail.draw(g, 0, 0, 0.26 * k, 0.6 * k, fog); g.restore();
+      body.draw(g, 0, 0, 1.06 * k, 0.66 * k, fog);
+    }
     // remoras riding underneath
     for (const [x, y, s] of [[0.1, 0.138, 1], [-0.08, 0.128, 0.8], [0.2, 0.128, 0.7]]) { g.fillStyle = rgbStr(mixRGB([96, 104, 112], FOG_RGB, fog)); g.beginPath(); g.ellipse(x * k, y * k, 0.03 * k * s, 0.0055 * k * s, 0.05, 0, TAU); g.fill(); g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect((x - 0.02 * s) * k, (y - 0.003 * s) * k, 0.03 * k * s, 0.002 * k); }
     // juvenile golden trevallies piloting ahead of the mouth
@@ -2540,6 +3258,7 @@ class Dolphins {
   draw(g) {
     const L = 320, body = vspr('dBody', 1.1, 0.62, L, paintDolphinBody), fl = vspr('dFluke', 0.26, 0.24, L, paintDolphinFluke, 1, 0.5);
     for (const d of [...this.pod].sort((a, b) => b.z - a.z)) {
+      if (d.glTile) { fglBlit(g, d); continue; }
       const k = d.k, fog = depthFog(d.z), osc = Math.sin(d.ph);
       g.save(); g.translate(d.x, d.y); g.scale(this.dir, 1); g.rotate(d.pitch * this.dir + osc * 0.05);
       g.save(); g.translate(-0.49 * k, 0); g.rotate(osc * 0.45); fl.draw(g, 0, 0, 0.26 * k, 0.24 * k, fog); g.restore();
@@ -2567,6 +3286,7 @@ class Humpback extends Crosser {
   constructor(info) { super(info, Math.min(U * 120, W * 1.2), 6, 0.93, rand(0.36, 0.46)); this.kick = rand(TAU); this.sang = false; }
   update(dt) { this.kick += dt * TAU * 0.22; if (!this.sang && this.t > 2) { this.sang = true; AUDIO.whale(); } return this.step(dt, 0.015, 0.12); }
   draw(g) {
+    if (this.glTile) return fglBlit(g, this);
     const L = 600, k = this.k, fog = depthFog(this.z), osc = Math.sin(this.kick);
     const body = vspr('hbBody', 1.06, 0.3, L, paintHumpbackBody), fin = vspr('hbFin', 0.36, 0.12, L, paintHumpbackFin, 1, 0.3), fl = vspr('hbFluke', 0.2, 0.08, L, paintHumpbackFluke, 1, 0.5);
     g.save(); g.translate(this.x, this.y); g.scale(this.dir, 1); g.rotate(this.pitch * this.dir + osc * 0.02);
@@ -2588,12 +3308,23 @@ class Diver extends Crosser {
     LIFE.danger.push({ x: this.x, y: this.y, r: U * 24 });
     return this.step(dt, 0.02, 0.18);
   }
+  // two-segment limb from (x0, y0): [knee x, y, end x, y, end angle]
+  limbPts(x0, y0, a1, l1, a2, l2) {
+    const x1 = x0 + Math.cos(a1) * l1, y1 = y0 + Math.sin(a1) * l1;
+    return [x1, y1, x1 + Math.cos(a1 + a2) * l2, y1 + Math.sin(a1 + a2) * l2, a1 + a2];
+  }
   limb(g, x0, y0, a1, l1, a2, l2, w, col) {
-    const x1 = x0 + Math.cos(a1) * l1, y1 = y0 + Math.sin(a1) * l1, x2 = x1 + Math.cos(a1 + a2) * l2, y2 = y1 + Math.sin(a1 + a2) * l2;
+    const [x1, y1, x2, y2] = this.limbPts(x0, y0, a1, l1, a2, l2);
     g.strokeStyle = col; g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = w; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.lineTo(x2, y2); g.stroke();
     return [x2, y2, a1 + a2];
   }
   draw(g) {
+    if (this.glTile) {
+      fglBlit(g, this);
+      g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir * 0.6); g.scale(this.dir * this.k, this.k);
+      this.gear(g, depthFog(this.z), true); this.face(g); g.restore();
+      return;
+    }
     const k = this.k, fog = depthFog(this.z), suit = rgbStr(mixRGB([26, 32, 44], FOG_RGB, fog)), suit2 = rgbStr(mixRGB([14, 18, 26], FOG_RGB, fog));
     const finC = rgbStr(mixRGB(hexRGB(this.fin), FOG_RGB, fog));
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir * 0.6); g.scale(this.dir * k, k);
@@ -2611,19 +3342,26 @@ class Diver extends Crosser {
     g.fillStyle = '#555'; g.fillRect(0.16, -0.1, 0.035, 0.03);
     // torso with BCD
     g.fillStyle = suit; g.beginPath(); g.ellipse(0.02, 0.0, 0.19, 0.058, 0, 0, TAU); g.fill();
-    g.fillStyle = rgbStr(mixRGB([43, 179, 168], FOG_RGB, fog)); g.fillRect(-0.14, 0.015, 0.28, 0.012);
-    g.fillStyle = rgbStr(mixRGB([40, 44, 54], FOG_RGB, fog)); g.fillRect(-0.02, -0.05, 0.14, 0.09);
+    this.gear(g, fog, false);
     // head, hood, mask, regulator
     g.fillStyle = suit2; g.beginPath(); g.arc(0.25, -0.01, 0.048, 0, TAU); g.fill();
-    const mg = g.createLinearGradient(0.26, -0.04, 0.3, 0.0); mg.addColorStop(0, 'rgba(210,240,255,0.95)'); mg.addColorStop(1, 'rgba(60,120,160,0.9)');
-    g.fillStyle = '#111'; g.fillRect(0.265, -0.042, 0.035, 0.036); g.fillStyle = mg; g.fillRect(0.272, -0.036, 0.024, 0.024);
-    g.fillStyle = '#222'; g.beginPath(); g.arc(0.29, 0.02, 0.016, 0, TAU); g.fill();
-    g.strokeStyle = '#1a1a1a'; g.lineWidth = 0.01; g.beginPath(); g.moveTo(0.18, -0.08); g.quadraticCurveTo(0.26, -0.1, 0.29, 0.02); g.stroke();
+    this.face(g);
     leg(s1, suit);
     const [hx, hy] = this.limb(g, 0.15, 0.035, 0.75 + s2 * 0.05, 0.12, -0.55, 0.12, 0.05, suit);
     g.fillStyle = '#333'; g.save(); g.translate(hx, hy); g.rotate(-0.2); g.fillRect(-0.01, -0.012, 0.07, 0.024); g.fillStyle = '#ffe9a0'; g.fillRect(0.058, -0.01, 0.01, 0.02); g.restore();
     this.hand = [hx, hy];
     g.restore();
+  }
+  // harness strap and backpack; in 3D only the strap is drawn over the modelled torso
+  gear(g, fog, strapOnly) {
+    g.fillStyle = rgbStr(mixRGB([43, 179, 168], FOG_RGB, fog)); g.fillRect(-0.14, 0.015, 0.28, 0.012);
+    if (!strapOnly) { g.fillStyle = rgbStr(mixRGB([40, 44, 54], FOG_RGB, fog)); g.fillRect(-0.02, -0.05, 0.14, 0.09); }
+  }
+  face(g) {
+    const mg = g.createLinearGradient(0.26, -0.04, 0.3, 0.0); mg.addColorStop(0, 'rgba(210,240,255,0.95)'); mg.addColorStop(1, 'rgba(60,120,160,0.9)');
+    g.fillStyle = '#111'; g.fillRect(0.265, -0.042, 0.035, 0.036); g.fillStyle = mg; g.fillRect(0.272, -0.036, 0.024, 0.024);
+    g.fillStyle = '#222'; g.beginPath(); g.arc(0.29, 0.02, 0.016, 0, TAU); g.fill();
+    g.strokeStyle = '#1a1a1a'; g.lineWidth = 0.01; g.beginPath(); g.moveTo(0.18, -0.08); g.quadraticCurveTo(0.26, -0.1, 0.29, 0.02); g.stroke();
   }
   glow(g) {
     if (!this.hand) return;
@@ -2671,39 +3409,54 @@ class Octopus {
   }
   newLeg() { this.state = 'crawl'; this.st = 0; this.legs++; const s = Math.random() < 0.5 ? -1 : 1; this.tx = clamp(this.x + s * rand(0.07, 0.16) * W, W * 0.05, W * 0.95); if (Math.abs(this.tx - this.x) < W * 0.05) this.tx = clamp(this.x - s * W * 0.1, W * 0.05, W * 0.95); this.dir = sgn(this.tx - this.x); }
   palette() { const c = this.col; const a = c < 1 ? mixRGB([150, 62, 44], [228, 206, 188], c) : mixRGB([228, 206, 188], [190, 40, 40], c - 1); return a; }
+  // arm centre lines (px, relative to the body); each arm's half-width runs m·0.21 → 12% of that at the tip
+  armLines(t, m, jet) {
+    return this.arms.map((A, i) => {
+      const reach = (jet ? 0.9 : 0.55 + 0.35 * this.out) * A.len * (0.35 + 0.65 * this.out);
+      const baseA = jet ? Math.PI / 2 + (i - 3.5) * 0.08 : A.a + Math.sin(t * 0.9 + A.ph) * 0.25;
+      const n = 12, pts = []; let x = Math.cos(A.a) * m * 0.35, y = m * 0.25, a = baseA;
+      for (let s = 0; s <= n; s++) { pts.push([x, y]); const u = s / n; a += (Math.sin(t * 1.4 + A.ph + u * 4) * 0.18 + (jet ? 0 : (i < 4 ? -0.05 : 0.05)) + (u > 0.7 ? (i < 4 ? -0.35 : 0.35) * (u - 0.7) * 3 : 0)); x += Math.cos(a) * reach / n; y += Math.sin(a) * reach / n; }
+      return pts;
+    });
+  }
+  eyes(g, m, C) {
+    for (const s of [-1, 1]) {
+      const ex = s * m * 0.28, ey = m * 0.05;
+      g.fillStyle = C; g.beginPath(); g.arc(ex, ey, m * 0.16, 0, TAU); g.fill();
+      g.fillStyle = '#f2e6c0'; g.beginPath(); g.arc(ex, ey - m * 0.02, m * 0.1, 0, TAU); g.fill();
+      g.fillStyle = '#111'; g.fillRect(ex - m * 0.07, ey - m * 0.035, m * 0.14, m * 0.03);
+    }
+  }
   draw(g, t) {
     if (!this.gone && this.out > 0.01) {
       const m = this.m * (0.35 + 0.65 * this.out), col = this.palette(), dark = mixRGB(col, [40, 10, 10], 0.45), fog = depthFog(this.z);
       const C = rgbStr(mixRGB(col, FOG_RGB, fog)), D = rgbStr(mixRGB(dark, FOG_RGB, fog));
       const jet = this.state === 'jet';
-      g.save(); g.translate(this.x, this.y);
-      // arms
-      for (let i = 0; i < 8; i++) {
-        const A = this.arms[i], reach = (jet ? 0.9 : 0.55 + 0.35 * this.out) * A.len * (0.35 + 0.65 * this.out);
-        const baseA = jet ? Math.PI / 2 + (i - 3.5) * 0.08 : A.a + Math.sin(t * 0.9 + A.ph) * 0.25;
-        const bx = Math.cos(A.a) * m * 0.35, by = m * 0.25;
-        const n = 12, pts = []; let x = bx, y = by, a = baseA;
-        for (let s = 0; s <= n; s++) { pts.push([x, y]); const u = s / n; a += (Math.sin(t * 1.4 + A.ph + u * 4) * 0.18 + (jet ? 0 : (i < 4 ? -0.05 : 0.05)) + (u > 0.7 ? (i < 4 ? -0.35 : 0.35) * (u - 0.7) * 3 : 0)); x += Math.cos(a) * reach / n; y += Math.sin(a) * reach / n; }
-        g.beginPath();
-        for (let s = 0; s <= n; s++) { const w = m * 0.21 * (1 - s / n * 0.88); const p = pts[s], q = pts[Math.min(s + 1, n)]; const aa = Math.atan2(q[1] - p[1], q[0] - p[0] + 1e-6); s ? g.lineTo(p[0] - Math.sin(aa) * w, p[1] + Math.cos(aa) * w) : g.moveTo(p[0] - Math.sin(aa) * w, p[1] + Math.cos(aa) * w); }
-        for (let s = n; s >= 0; s--) { const w = m * 0.21 * (1 - s / n * 0.88); const p = pts[s], q = pts[Math.min(s + 1, n)]; const aa = Math.atan2(q[1] - p[1], q[0] - p[0] + 1e-6); g.lineTo(p[0] + Math.sin(aa) * w, p[1] - Math.cos(aa) * w); }
-        g.closePath(); g.fillStyle = i % 2 ? D : C; g.fill();
-        if (i % 2 === 0) { g.fillStyle = 'rgba(255,235,225,0.55)'; for (let s = 2; s < n; s += 1) { const p = pts[s]; g.beginPath(); g.arc(p[0], p[1] + m * 0.05, m * 0.035 * (1 - s / n), 0, TAU); g.fill(); } }
+      if (this.glTile) {
+        fglBlit(g, this);
+        g.save(); g.translate(this.x, this.y); this.eyes(g, m, C); g.restore();
+      } else {
+        g.save(); g.translate(this.x, this.y);
+        // arms
+        const lines = this.armLines(t, m, jet), n = 12;
+        for (let i = 0; i < 8; i++) {
+          const pts = lines[i];
+          g.beginPath();
+          for (let s = 0; s <= n; s++) { const w = m * 0.21 * (1 - s / n * 0.88); const p = pts[s], q = pts[Math.min(s + 1, n)]; const aa = Math.atan2(q[1] - p[1], q[0] - p[0] + 1e-6); s ? g.lineTo(p[0] - Math.sin(aa) * w, p[1] + Math.cos(aa) * w) : g.moveTo(p[0] - Math.sin(aa) * w, p[1] + Math.cos(aa) * w); }
+          for (let s = n; s >= 0; s--) { const w = m * 0.21 * (1 - s / n * 0.88); const p = pts[s], q = pts[Math.min(s + 1, n)]; const aa = Math.atan2(q[1] - p[1], q[0] - p[0] + 1e-6); g.lineTo(p[0] + Math.sin(aa) * w, p[1] - Math.cos(aa) * w); }
+          g.closePath(); g.fillStyle = i % 2 ? D : C; g.fill();
+          if (i % 2 === 0) { g.fillStyle = 'rgba(255,235,225,0.55)'; for (let s = 2; s < n; s += 1) { const p = pts[s]; g.beginPath(); g.arc(p[0], p[1] + m * 0.05, m * 0.035 * (1 - s / n), 0, TAU); g.fill(); } }
+        }
+        // mantle and head
+        g.rotate(jet ? 0 : -0.5 * this.dir);
+        const gr = g.createRadialGradient(-m * 0.15, -m * 0.5, m * 0.1, 0, -m * 0.3, m * 0.9); gr.addColorStop(0, rgbStr(mixRGB(col, [255, 240, 230], 0.3))); gr.addColorStop(1, D);
+        g.fillStyle = gr; g.beginPath(); g.ellipse(0, -m * 0.45, m * 0.45, m * 0.62, 0, 0, TAU); g.fill();
+        g.fillStyle = 'rgba(255,240,230,0.35)'; for (let i = 0; i < 18; i++) { g.beginPath(); g.arc(Math.sin(i * 2.3) * m * 0.35, -m * 0.45 + Math.cos(i * 1.7) * m * 0.5, m * 0.035, 0, TAU); g.fill(); }
+        g.fillStyle = 'rgba(40,10,10,0.3)'; for (let i = 0; i < 10; i++) { g.beginPath(); g.arc(Math.cos(i * 2.9) * m * 0.3, -m * 0.5 + Math.sin(i * 1.3) * m * 0.4, m * 0.06, 0, TAU); g.fill(); }
+        g.rotate(jet ? 0 : 0.5 * this.dir);
+        this.eyes(g, m, C);
+        g.restore();
       }
-      // mantle and head
-      g.rotate(jet ? 0 : -0.5 * this.dir);
-      const gr = g.createRadialGradient(-m * 0.15, -m * 0.5, m * 0.1, 0, -m * 0.3, m * 0.9); gr.addColorStop(0, rgbStr(mixRGB(col, [255, 240, 230], 0.3))); gr.addColorStop(1, D);
-      g.fillStyle = gr; g.beginPath(); g.ellipse(0, -m * 0.45, m * 0.45, m * 0.62, 0, 0, TAU); g.fill();
-      g.fillStyle = 'rgba(255,240,230,0.35)'; for (let i = 0; i < 18; i++) { g.beginPath(); g.arc(Math.sin(i * 2.3) * m * 0.35, -m * 0.45 + Math.cos(i * 1.7) * m * 0.5, m * 0.035, 0, TAU); g.fill(); }
-      g.fillStyle = 'rgba(40,10,10,0.3)'; for (let i = 0; i < 10; i++) { g.beginPath(); g.arc(Math.cos(i * 2.9) * m * 0.3, -m * 0.5 + Math.sin(i * 1.3) * m * 0.4, m * 0.06, 0, TAU); g.fill(); }
-      g.rotate(jet ? 0 : 0.5 * this.dir);
-      for (const s of [-1, 1]) {
-        const ex = s * m * 0.28, ey = m * 0.05;
-        g.fillStyle = C; g.beginPath(); g.arc(ex, ey, m * 0.16, 0, TAU); g.fill();
-        g.fillStyle = '#f2e6c0'; g.beginPath(); g.arc(ex, ey - m * 0.02, m * 0.1, 0, TAU); g.fill();
-        g.fillStyle = '#111'; g.fillRect(ex - m * 0.07, ey - m * 0.035, m * 0.14, m * 0.03);
-      }
-      g.restore();
     }
     for (const p of this.ink) { const a = Math.max(0, 0.55 * (1 - p.life / 7)); g.globalAlpha = a; g.drawImage(GLOW.ink, p.x - p.r, p.y - p.r, p.r * 2, p.r * 2); }
     g.globalAlpha = 1;
@@ -2736,6 +3489,7 @@ class Mola extends Crosser {
   constructor(info) { super(info, Math.min(U * 22, W * 0.4), 2.6, rand(0.3, 0.45), rand(0.26, 0.48)); this.fl = rand(TAU); }
   update(dt) { this.fl += dt * TAU * 0.45; return this.step(dt, 0.03, 0.2); }
   draw(g) {
+    if (this.glTile) return fglBlit(g, this);
     const L = 360, k = this.k, fog = depthFog(this.z), o = Math.sin(this.fl);
     const body = vspr('mBody', 1.04, 0.92, L, paintMolaBody), df = vspr('mD', 0.26, 0.6, L, paintMolaFin(true), 0.5, 1), af = vspr('mA', 0.26, 0.6, L, paintMolaFin(false), 0.5, 0);
     g.save(); g.translate(this.x, this.y); g.scale(this.dir, 1); g.rotate(0.12 * Math.sin(this.t * 0.3) + this.pitch * this.dir);
@@ -2747,6 +3501,14 @@ class Mola extends Crosser {
 }
 
 /* ---------------- Flashlight fish (night only) ---------------- */
+// one fish in body lengths, light organ shut (the 3D model; the lit organ is drawn over it)
+function paintFlashlightFish(g) {
+  const body = new Path2D(); body.ellipse(0, 0, 0.5, 0.22, 0, 0, TAU);
+  g.fillStyle = '#0e1626'; g.beginPath(); g.moveTo(-0.45, 0); g.lineTo(-0.75, -0.2); g.lineTo(-0.68, 0); g.lineTo(-0.75, 0.2); g.fill();
+  g.fill(body); shade(g, body, -0.22, 0.22, { top: 0.2, sheen: 0.3 });
+  g.fillStyle = '#1a2638'; g.beginPath(); g.ellipse(0.28, 0.05, 0.09, 0.05, 0, 0, TAU); g.fill();
+  g.fillStyle = '#2a3a50'; g.beginPath(); g.arc(0.3, -0.05, 0.05, 0, TAU); g.fill();
+}
 class Flashlights {
   constructor(info) {
     this.info = info; this.kind = 'visitor'; this.z = 0.3; this.dir = Math.random() < 0.5 ? 1 : -1; this.t = 0; this.leaving = false;
@@ -2768,6 +3530,11 @@ class Flashlights {
   draw(g) {
     const k = U * 2.6;
     for (const f of this.fish) {
+      if (f.glTile) {
+        fglBlit(g, f);
+        if (f.off <= 0) { g.save(); g.translate(f.x, f.y); g.scale(f.d * f.s, f.s); g.fillStyle = '#dffcff'; g.beginPath(); g.ellipse(k * 0.28, k * 0.05, k * 0.09, k * 0.05, 0, 0, TAU); g.fill(); g.restore(); }
+        continue;
+      }
       g.save(); g.translate(f.x, f.y); g.scale(f.d * f.s, f.s);
       g.fillStyle = '#0e1626'; g.beginPath(); g.ellipse(0, 0, k * 0.5, k * 0.22, 0, 0, TAU); g.fill();
       g.beginPath(); g.moveTo(-k * 0.45, 0); g.lineTo(-k * 0.75, -k * 0.2); g.lineTo(-k * 0.68, 0); g.lineTo(-k * 0.75, k * 0.2); g.fill();
@@ -2818,6 +3585,175 @@ function updateVisitors(dt, t) {
     if (!VIS.active.update(dt, t)) { VIS.active = null; VIS.next = VIS.pending ? 0.8 : TOD.mode === 'cycle' ? rand(35, 75) : rand(150, 420); }
   } else { VIS.next -= dt; if (VIS.next <= 0) summonVisitor(); }
 }
+
+/* =====================================================================
+   3D rigs for the special visitors (see 06b_fish_gl.js). Each glJobs()
+   poses the model to match its 2D draw(): mirror = swimming direction,
+   pitch = the canvas rotation. Where the 2D code rotates before it
+   mirrors (scale then rotate), the pitch changes sign. Meshes are built
+   the first time a visitor appears.
+   ===================================================================== */
+const rgb1 = (c) => c.map((v) => v / 255);
+
+Turtle.prototype.glJobs = function () {
+  const m = fglCached('turtle', () => {
+    const skin = { rough: 0.6, finRough: 0.6, sss: 0.3 };
+    return {
+      shell: fglMesh({ paint: paintTurtleShell, x0: -0.54, x1: 0.54, y0: -0.37, y1: 0.37, thick: 0.5, NX: 96, mat: { rough: 0.45 } }),
+      head: fglMesh({ paint: paintTurtleHead, x0: 0, x1: 0.38, y0: -0.12, y1: 0.12, thick: 0.6, NX: 48, mat: skin }),
+      front: fglQuad({ paint: paintTurtleFlipper(0.7, 0.2), w: 0.72, h: 0.24, ox: 1, oy: 0.5, mat: skin }),
+      rear: fglQuad({ paint: paintTurtleFlipper(0.28, 0.12), w: 0.3, h: 0.16, ox: 1, oy: 0.5, mat: skin }),
+    };
+  });
+  const st = this.stroke, a = -(0.12 + 0.78 * Math.sin(st)), a2 = -(0.12 + 0.78 * Math.sin(st - 0.5)), sz = m.shell.hAt(0.2, 0.05);
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k: this.k, hw: 1.0, hh: 0.9 + Math.abs(Math.sin(this.pitch)), render: () => {
+    fglPose({ pitch: this.pitch * this.dir, mirror: this.dir, yaw: 0.2 * Math.sin(this.t * 0.4) });
+    fglDraw(m.front, { x: 0.2, y: -0.04, z: -sz * 0.8, tilt: a2 - 0.1, splay: -0.35 });   // far front flipper
+    fglDraw(m.rear, { x: -0.36, y: 0.07, z: sz * 0.5, tilt: -0.35 + 0.18 * Math.sin(st * 0.5), splay: 0.3 });
+    fglDraw(m.shell);
+    fglDraw(m.head, { x: 0.46, y: 0.03, tilt: Math.sin(st) * 0.06 });
+    fglDraw(m.front, { x: 0.24, y: 0.07, z: sz * 0.8, tilt: a, splay: 0.35 });            // near front flipper
+  } }];
+};
+
+// seen from below: the wings hinge about the body axis, flapping toward and away from us
+Manta.prototype.glJobs = function () {
+  if (!this.glMesh) this.glMesh = fglMesh({ paint: (g) => paintManta(g, 0, this.spots), x0: -0.62, x1: 0.3, y0: -0.52, y1: 0.52, thick: 0.18, NX: 96, mat: { rough: 0.35, sss: 0.2 } });
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k: this.k, hw: 0.7, hh: 0.62, render: () => {
+    fglPose({ pitch: this.pitch * this.dir * 0.5, mirror: this.dir, flap: [0.7, this.flap, 0.08] });
+    fglDraw(this.glMesh);
+  } }];
+};
+
+Shark.prototype.glJobs = function () {
+  const m = fglCached('shark', () => fglMesh({ x0: -0.83, x1: 0.54, y0: -0.37, y1: 0.36, thick: 0.45, NX: 120, mat: { rough: 0.45, scale: 0.006, sss: 0.3 },
+    paint: (g) => { g.save(); g.translate(-0.49, 0); paintSharkTail(g); g.restore(); paintSharkBody(g); } }));
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k: this.k, hw: 0.9, hh: 0.45 + 0.9 * Math.abs(Math.sin(this.pitch)), render: () => {
+    fglPose({ pitch: this.pitch * this.dir, mirror: this.dir, yaw: 0.12 * Math.sin(this.t * 0.5), phase: this.ph2, amp: 0.12, finAmp: 0.01 });
+    fglDraw(m);
+  } }];
+};
+
+WhaleShark.prototype.glJobs = function () {
+  const m = fglCached('whaleshark', () => fglMesh({ x0: -0.75, x1: 0.53, y0: -0.35, y1: 0.33, thick: 0.5, NX: 140, mat: { rough: 0.55, sss: 0.2 },
+    paint: (g) => { g.save(); g.translate(-0.49, 0); paintWhaleSharkTail(g); g.restore(); paintWhaleSharkBody(g); } }));
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k: this.k, hw: 0.8, hh: 0.4 + 0.8 * Math.abs(Math.sin(this.pitch)), render: () => {
+    fglPose({ pitch: this.pitch * this.dir, mirror: this.dir, yaw: 0.08 * Math.sin(this.t * 0.3), phase: this.ph2, amp: 0.09, finAmp: 0.008 });
+    fglDraw(m);
+  } }];
+};
+
+// mammals: the fluke beats up and down
+Dolphins.prototype.glJobs = function () {
+  const m = fglCached('dolphin', () => fglMesh({ x0: -0.75, x1: 0.55, y0: -0.31, y1: 0.31, thick: 0.5, NX: 110, mat: { rough: 0.22, sss: 0.3 },
+    paint: (g) => { g.save(); g.translate(-0.49, 0); paintDolphinFluke(g); g.restore(); paintDolphinBody(g); } }));
+  return this.pod.map((d) => d.k > 0 && { obj: d, x: d.x, y: d.y, z: d.z, k: d.k, hw: 0.85, hh: 0.85, render: () => {
+    fglPose({ pitch: -(d.pitch * this.dir + Math.sin(d.ph) * 0.05), mirror: this.dir, phase: d.ph, amp: 0.1, axis: 1 });
+    fglDraw(m);
+  } });
+};
+
+Humpback.prototype.glJobs = function () {
+  const m = fglCached('humpback', () => {
+    const mat = { rough: 0.4, sss: 0.2 };
+    const body = fglMesh({ x0: -0.69, x1: 0.53, y0: -0.15, y1: 0.15, thick: 0.45, NX: 140, mat,
+      paint: (g) => { g.save(); g.translate(-0.49, 0); paintHumpbackFluke(g); g.restore(); paintHumpbackBody(g); } });
+    return { body, fin: fglQuad({ paint: paintHumpbackFin, w: 0.36, h: 0.12, ox: 1, oy: 0.3, mat }), finZ: body.hAt(0.2, 0.07) + 0.005 };
+  });
+  const osc = Math.sin(this.kick);
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k: this.k, hw: 0.75, hh: 0.45, render: () => {
+    fglPose({ pitch: -(this.pitch * this.dir + osc * 0.02), mirror: this.dir, phase: this.kick, amp: 0.05, axis: 1 });
+    fglDraw(m.body);
+    fglDraw(m.fin, { x: 0.2, y: 0.07, z: m.finZ, tilt: -0.25 + Math.sin(this.kick * 0.5) * 0.12, splay: 0.35 });
+  } }];
+};
+
+// sculls with its tall dorsal and anal fins, swinging them to the side together
+Mola.prototype.glJobs = function () {
+  const m = fglCached('mola', () => {
+    const mat = { rough: 0.6, sss: 0.2 };
+    return {
+      body: fglMesh({ paint: paintMolaBody, x0: -0.54, x1: 0.52, y0: -0.46, y1: 0.46, thick: 0.35, NX: 96, mat }),
+      dorsal: fglQuad({ paint: paintMolaFin(true), w: 0.26, h: 0.6, ox: 0.5, oy: 1, mat }),
+      anal: fglQuad({ paint: paintMolaFin(false), w: 0.26, h: 0.6, ox: 0.5, oy: 0, mat }),
+    };
+  });
+  const o = Math.sin(this.fl);
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k: this.k, hw: 0.75, hh: 1.2, render: () => {
+    fglPose({ pitch: -(0.12 * Math.sin(this.t * 0.3) + this.pitch * this.dir), mirror: this.dir, yaw: 0.1 * Math.sin(this.t * 0.25) });
+    fglDraw(m.dorsal, { x: -0.22, y: -0.36, tilt: -0.35 + o * 0.1, roll: o * 0.6 });
+    fglDraw(m.anal, { x: -0.22, y: 0.36, tilt: 0.35 + o * 0.1, roll: -o * 0.6 });
+    fglDraw(m.body);
+  } }];
+};
+
+// tubes for limbs, ellipsoids for torso, tank and head; mask and regulator are drawn over in 2D
+Diver.prototype.glJobs = function () {
+  const m = fglCached('diver', () => ({
+    torso: fglEllipsoid(0.19, 0.058, 0.075, { cx: 0.02 }),
+    tank: fglEllipsoid(0.15, 0.042, 0.045, { cx: 0.02, cy: -0.085, mat: { rough: 0.25, tint: rgb1([229, 194, 41]) } }),
+    head: fglEllipsoid(0.048, 0.048, 0.05, { cx: 0.25, cy: -0.01 }),
+    torch: fglEllipsoid(0.04, 0.013, 0.013, { mat: { rough: 0.4, tint: [0.2, 0.2, 0.2] } }),
+    fin: fglQuad({ paint: (g) => { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(0, -0.02); g.lineTo(0.24, -0.035); g.quadraticCurveTo(0.26, 0.0, 0.24, 0.03); g.lineTo(0, 0.025); g.closePath(); g.fill(); },
+      w: 0.27, h: 0.08, ox: 0, oy: 0.5, mat: { rough: 0.4 } }),
+  }));
+  const s1 = Math.sin(this.kick), s2 = Math.sin(this.kick + Math.PI);
+  const leg = (s) => this.limbPts(-0.15, 0.01, Math.PI - 0.05 + s * 0.2, 0.2, -0.18 - s * 0.16, 0.19);
+  const L1 = leg(s2), L2 = leg(s1), A1 = this.limbPts(0.15, 0.03, 0.9 + s1 * 0.05, 0.12, -0.6, 0.12), A2 = this.limbPts(0.15, 0.035, 0.75 + s2 * 0.05, 0.12, -0.55, 0.12);
+  this.hand = [A2[2], A2[3]];
+  const tube = (x0, y0, P, r0, r1, z) => ({ pts: [[x0, y0, z], [(x0 + P[0]) / 2, (y0 + P[1]) / 2, z], [P[0], P[1], z], [(P[0] + P[2]) / 2, (P[1] + P[3]) / 2, z], [P[2], P[3], z]],
+    r: [0, 0.25, 0.5, 0.75, 1].map((f) => lerp(r0, r1, f)) });
+  const suit = { rough: 0.75, sss: 0.1, tint: rgb1([26, 32, 44]) }, suit2 = { ...suit, tint: rgb1([14, 18, 26]) }, fin = { ...m.fin.mat, tint: rgb1(hexRGB(this.fin)) };
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k: this.k, hw: 0.9, hh: 0.5 + 0.9 * Math.abs(Math.sin(this.pitch)), render: () => {
+    fglPose({ pitch: this.pitch * this.dir * 0.6, mirror: this.dir });
+    fglDraw(fglDynamic(fglTubes([tube(-0.15, 0.01, L1, 0.035, 0.025, -0.045), tube(0.15, 0.03, A1, 0.025, 0.018, -0.05)])), null, true, suit2);
+    fglDraw(m.fin, { x: L1[2], y: L1[3], z: -0.045, tilt: L1[4] - 0.1 + s2 * 0.25 }, true, fin);
+    fglDraw(m.tank); fglDraw(m.torso, null, true, suit); fglDraw(m.head, null, true, suit2);
+    fglDraw(fglDynamic(fglTubes([tube(-0.15, 0.01, L2, 0.035, 0.025, 0.045), tube(0.15, 0.035, A2, 0.027, 0.02, 0.05)])), null, true, suit);
+    fglDraw(m.fin, { x: L2[2], y: L2[3], z: 0.045, tilt: L2[4] - 0.1 + s1 * 0.25 }, true, fin);
+    fglDraw(m.torch, { x: A2[2] + Math.cos(-0.2) * 0.03, y: A2[3] + Math.sin(-0.2) * 0.03, z: 0.05, tilt: -0.2 });
+  } }];
+};
+
+// arms are tubes along the same centre lines the 2D drawing uses, the mantle an ellipsoid; skin tinted by its mood colour
+function octopusSkin() {
+  const c = mk(256, 256), g = c.getContext('2d');
+  g.fillStyle = '#ece4dc'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 160; i++) { g.fillStyle = `rgba(90,50,40,${rand(0.12, 0.3)})`; g.beginPath(); g.ellipse(rand(256), rand(256), rand(4, 14), rand(3, 9), rand(TAU), 0, TAU); g.fill(); }
+  for (let i = 0; i < 500; i++) { g.fillStyle = 'rgba(255,248,240,0.45)'; g.beginPath(); g.arc(rand(256), rand(256), rand(0.8, 2.2), 0, TAU); g.fill(); }
+  // two rows of suckers along the side of each arm that faces us (v ≈ 0.25)
+  for (let x = 6; x < 256; x += 11) for (const y of [56, 72]) {
+    g.fillStyle = '#f6eee4'; g.beginPath(); g.arc(x + (y > 60 ? 5 : 0), y, 4.5, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(120,70,60,0.5)'; g.lineWidth = 1; g.stroke();
+  }
+  return { t: fglTexture(c), texel: [1 / 256, 1 / 256] };
+}
+Octopus.prototype.glJobs = function (t) {
+  if (this.gone || this.out <= 0.01) return null;
+  const skin = fglCached('octoSkin', octopusSkin);
+  const mantle = fglCached('octoMantle', () => fglEllipsoid(0.45, 0.62, 0.42, { cy: -0.45, tex: skin }));
+  const m = this.m * (0.35 + 0.65 * this.out), jet = this.state === 'jet', lines = this.armLines(t, m, jet);
+  let ext = 1.1;
+  const tubes = lines.map((pts, i) => ({
+    pts: pts.map(([x, y], s) => { ext = Math.max(ext, Math.abs(x) / m, Math.abs(y) / m); return [x / m, y / m, (i % 2 ? -1 : 1) * 0.12 + Math.sin(t * 1.1 + i + s * 0.4) * 0.08]; }),
+    r: pts.map((_, s) => 0.21 * (1 - (s / 12) * 0.88)),
+  }));
+  const mat = { rough: 0.35, sss: 0.8, tint: rgb1(this.palette()) };
+  return [{ obj: this, x: this.x, y: this.y, z: this.z, k: m, hw: ext + 0.3, hh: ext + 0.3, render: () => {
+    fglPose({});
+    fglDraw(fglDynamic(fglTubes(tubes), { tex: skin }), null, true, mat);
+    fglDraw(mantle, { tilt: jet ? 0 : -0.5 * this.dir }, true, mat);
+  } }];
+};
+
+Flashlights.prototype.glJobs = function () {
+  const m = fglCached('flashlight', () => fglMesh({ paint: paintFlashlightFish, x0: -0.78, x1: 0.52, y0: -0.25, y1: 0.25, thick: 0.45, NX: 48, mat: { rough: 0.3, scale: 0.03, iri: 0.2 } }));
+  const k = U * 2.6;
+  return this.fish.map((f) => ({ obj: f, x: f.x, y: f.y, z: this.z, k: k * f.s, hw: 0.85, hh: 0.5, render: () => {
+    fglPose({ mirror: f.d, phase: this.t * 9 + f.ph, amp: 0.1, finAmp: 0.015 });
+    fglDraw(m);
+  } }));
+};
 
 /* =====================================================================
    Sound, interaction, render pipeline, boot
@@ -2899,7 +3835,7 @@ function identify(ent) {
 function placeLabel(g) {
   if (!LABEL.ent) return;
   if (CLOCK.t > LABEL.until || (LABEL.ent.kind === 'visitor' && LABEL.ent !== VIS.active)) { tagEl.classList.remove('show'); LABEL.ent = null; return; }
-  const [ax, ay] = LABEL.ent.anchor();
+  const f = par(LABEL.ent.z), [ax, ay] = LABEL.ent.anchor().map((v, i) => v + (i ? CAM.y : CAM.x) * f);
   const tw = tagEl.offsetWidth, th = tagEl.offsetHeight;
   let tx = ax + U * 3, ty = ay - th - U * 4;
   if (tx + tw > W - 16) tx = ax - tw - U * 3;
@@ -2922,14 +3858,18 @@ function showCaption(v) {
 /* ---------------- render ---------------- */
 const CLOCK = { t: 0 };
 const buckets = { far: [], mid: [], near: [] };
-function drawList(g, list, t) { for (const e of list) e.draw(g, t); }
+// shift the view for a layer at parallax factor f
+function view(g, f) { g.setTransform(PX, 0, 0, PX, CAM.x * f * PX, CAM.y * f * PX); }
+function drawList(g, list, t) { for (const e of list) { view(g, par(e.z)); e.draw(g, t); } }
+const REEF_BACK = 0.45, REEF_FRONT = 0.75;
 function render(t) {
   const g = ctx;
   g.setTransform(PX, 0, 0, PX, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
   // sprites carry their own mips, so bilinear is enough; 'high' roughly halves the frame rate
   g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'low';
-  g.drawImage(ENV.bg, 0, 0, W, H);
-  drawSurface(g, t);
+  const P = CAM.pad;
+  view(g, 0.1); g.drawImage(ENV.bg, -P, -P * 0.5, W + 2 * P, H + P);
+  view(g, 0.15); drawSurface(g, t);
   buckets.far.length = buckets.mid.length = buckets.near.length = 0;
   const all = [...FISH.list, ...LIFE.jellies];
   if (VIS.active) all.push(VIS.active);
@@ -2937,30 +3877,32 @@ function render(t) {
   if (LIFE.anemone) all.push(ANEMONE_ENT);
   for (const e of all) (e.z > 0.62 ? buckets.far : e.z > 0.3 ? buckets.mid : buckets.near).push(e);
   for (const b of Object.values(buckets)) b.sort((a, c) => c.z - a.z);
+  updateRays(t); fglPrepare(all, t);
   const bt = REEF.bandTop, bh = H - bt;
   drawList(g, buckets.far, t);
-  drawRays(g, t);
-  drawSnow(g, false);
-  g.drawImage(REEF.back, 0, bt, W, bh);
+  view(g, 0.4); drawRays(g);
+  view(g, 0.55); drawSnow(g, false);
+  view(g, REEF_BACK); g.drawImage(reefLayer('back'), -P, bt, W + 2 * P, bh);
   drawList(g, buckets.mid, t);
-  g.drawImage(REEF.front, 0, bt, W, bh);
-  drawCaustics(g, t);
+  view(g, REEF_FRONT); g.drawImage(reefLayer('front'), -P, bt, W + 2 * P, bh);
+  drawCaustics(g, t); drawShadows(g);
   drawEels(g, t); drawMoray(g); drawAnemone(g, t, 'back'); drawGrass(g, t, false); drawChest(g); drawCrab(g);
   drawList(g, buckets.near, t);
-  drawFood(g); drawBubbles(g);
+  view(g, 0.9); drawFood(g); drawBubbles(g);
   drawGrass(g, t, true);
-  g.drawImage(REEF.fg, 0, bt, W, bh);
-  drawSnow(g, true);
-  drawGrade(g);
+  view(g, 1.3); g.drawImage(REEF.fg, -P * 1.8, bt, W + 3.6 * P, bh);
+  view(g, 1.1); drawSnow(g, true);
+  view(g, 0); drawGrade(g);
   // light that survives the dark: fluorescence, bioluminescence, torches
   g.globalCompositeOperation = 'lighter';
-  if (TOD.night > 0.02) { g.globalAlpha = TOD.night * (0.62 + 0.1 * Math.sin(t * 0.5)); g.drawImage(REEF.fluo, 0, bt, W, bh); g.globalAlpha = 1; }
+  view(g, REEF_FRONT);
+  if (TOD.night > 0.02) { g.globalAlpha = TOD.night * (0.62 + 0.1 * Math.sin(t * 0.5)); g.drawImage(REEF.fluo, -P, bt, W + 2 * P, bh); g.globalAlpha = 1; }
   glowAnemone(g); glowChest(g);
-  for (const j of LIFE.jellies) j.glow(g);
-  if (VIS.active && VIS.active.glow) VIS.active.glow(g);
-  drawSparks(g);
+  for (const j of LIFE.jellies) { view(g, par(j.z)); j.glow(g); }
+  if (VIS.active && VIS.active.glow) { view(g, par(VIS.active.z)); VIS.active.glow(g); }
+  view(g, 0.8); drawSparks(g);
   g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
-  g.drawImage(ENV.vignette, 0, 0, W, H);
+  view(g, 0); g.drawImage(ENV.vignette, 0, 0, W, H);
   placeLabel(g);
 }
 
@@ -2968,7 +3910,7 @@ function render(t) {
 let clockTick = 0;
 const clockEl = document.getElementById('clock');
 function update(dt, t) {
-  updateTOD(dt);
+  updateTOD(dt); updateCurrent(t); updateCam(dt, t, !body.classList.contains('idle'));
   LIFE.danger.length = 0;
   updateVisitors(dt, t);
   updateSchools(dt);
@@ -3003,7 +3945,7 @@ function pickAt(x, y) {
   const cands = [...FISH.list, ...LIFE.jellies, EEL_ENT, ANEMONE_ENT, MORAY, CRAB];
   if (FISH.seahorse) cands.push(FISH.seahorse);
   if (VIS.active) cands.push(VIS.active);
-  for (const e of cands) { const h = e.hit(x, y); if (h >= 0) { const s = h + e.z * 0.8; if (s < bs) { bs = s; best = e; } } }
+  for (const e of cands) { const f = par(e.z), h = e.hit(x - CAM.x * f, y - CAM.y * f); if (h >= 0) { const s = h + e.z * 0.8; if (s < bs) { bs = s; best = e; } } }
   return best;
 }
 cv.addEventListener('pointerdown', (ev) => {
@@ -3016,12 +3958,13 @@ cv.addEventListener('pointerdown', (ev) => {
 const body = document.body;
 let idleTimer = 0, dockHover = false;
 function wake() { body.classList.remove('idle'); clearTimeout(idleTimer); idleTimer = setTimeout(() => { if (!dockHover) { body.classList.add('idle'); body.classList.remove('open'); capEl.classList.remove('show'); tagEl.classList.remove('show'); LABEL.ent = null; } }, 3800); }
-addEventListener('pointermove', wake, { passive: true });
+addEventListener('pointermove', (e) => { CAM.px = (e.clientX / W - 0.5) * 2; CAM.py = (e.clientY / H - 0.5) * 2; wake(); }, { passive: true });
 addEventListener('keydown', (e) => {
   wake();
   if (e.target.closest && e.target.closest('button')) return;
   if (e.key === 'f' || e.key === 'F') toggleFull();
   else if (e.key === 'v' || e.key === 'V') callVisitor();
+  else if (e.key === 'g' || e.key === 'G') fglToggle();
   else if (e.key === ' ') { e.preventDefault(); feed(); }
 });
 const dock = document.getElementById('dock');
@@ -3054,7 +3997,7 @@ document.addEventListener('fullscreenchange', () => { const b = document.getElem
 
 /* ---------------- boot ---------------- */
 function boot() {
-  measure(); buildGlows(); buildBubbleSprite(); buildSpecies();
+  measure(); buildGlows(); buildBubbleSprite(); buildSpecies(); fglInit();
   buildEnvironment(); buildReef();
   initAnemone(); initGrass(); initEels(); initChest(); initSnow(); initJellies(); initMoray(); initCrab(); spawnFish();
   for (const j of LIFE.jellies) j.info = JELLY_INFO[j.kind];
@@ -3074,7 +4017,7 @@ function boot() {
   };
   requestAnimationFrame(loop);
 }
-window.reef = { summon(id) { const v = VISITORS.find((q) => q.id === id); if (v) { VIS.active = v.make(v); showCaption(v); } }, mode: setMode, feed, advance(s) { for (let i = 0; i < s * 30; i++) { CLOCK.t += 1 / 30; update(1 / 30, CLOCK.t); } } };
+window.reef = { summon(id) { const v = VISITORS.find((q) => q.id === id); if (v) { VIS.active = v.make(v); showCaption(v); } }, mode: setMode, feed, gl: fglToggle, advance(s) { for (let i = 0; i < s * 30; i++) { CLOCK.t += 1 / 30; update(1 / 30, CLOCK.t); } } };
 boot();
 
 </script>

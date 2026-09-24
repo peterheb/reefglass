@@ -78,7 +78,7 @@ function identify(ent) {
 function placeLabel(g) {
   if (!LABEL.ent) return;
   if (CLOCK.t > LABEL.until || (LABEL.ent.kind === 'visitor' && LABEL.ent !== VIS.active)) { tagEl.classList.remove('show'); LABEL.ent = null; return; }
-  const [ax, ay] = LABEL.ent.anchor();
+  const f = par(LABEL.ent.z), [ax, ay] = LABEL.ent.anchor().map((v, i) => v + (i ? CAM.y : CAM.x) * f);
   const tw = tagEl.offsetWidth, th = tagEl.offsetHeight;
   let tx = ax + U * 3, ty = ay - th - U * 4;
   if (tx + tw > W - 16) tx = ax - tw - U * 3;
@@ -101,14 +101,18 @@ function showCaption(v) {
 /* ---------------- render ---------------- */
 const CLOCK = { t: 0 };
 const buckets = { far: [], mid: [], near: [] };
-function drawList(g, list, t) { for (const e of list) e.draw(g, t); }
+// shift the view for a layer at parallax factor f
+function view(g, f) { g.setTransform(PX, 0, 0, PX, CAM.x * f * PX, CAM.y * f * PX); }
+function drawList(g, list, t) { for (const e of list) { view(g, par(e.z)); e.draw(g, t); } }
+const REEF_BACK = 0.45, REEF_FRONT = 0.75;
 function render(t) {
   const g = ctx;
   g.setTransform(PX, 0, 0, PX, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
   // sprites carry their own mips, so bilinear is enough; 'high' roughly halves the frame rate
   g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'low';
-  g.drawImage(ENV.bg, 0, 0, W, H);
-  drawSurface(g, t);
+  const P = CAM.pad;
+  view(g, 0.1); g.drawImage(ENV.bg, -P, -P * 0.5, W + 2 * P, H + P);
+  view(g, 0.15); drawSurface(g, t);
   buckets.far.length = buckets.mid.length = buckets.near.length = 0;
   const all = [...FISH.list, ...LIFE.jellies];
   if (VIS.active) all.push(VIS.active);
@@ -119,28 +123,29 @@ function render(t) {
   updateRays(t); fglPrepare(all, t);
   const bt = REEF.bandTop, bh = H - bt;
   drawList(g, buckets.far, t);
-  drawRays(g, t);
-  drawSnow(g, false);
-  g.drawImage(REEF.back, 0, bt, W, bh);
+  view(g, 0.4); drawRays(g);
+  view(g, 0.55); drawSnow(g, false);
+  view(g, REEF_BACK); g.drawImage(reefLayer('back'), -P, bt, W + 2 * P, bh);
   drawList(g, buckets.mid, t);
-  g.drawImage(REEF.front, 0, bt, W, bh);
-  drawCaustics(g, t);
+  view(g, REEF_FRONT); g.drawImage(reefLayer('front'), -P, bt, W + 2 * P, bh);
+  drawCaustics(g, t); drawShadows(g);
   drawEels(g, t); drawMoray(g); drawAnemone(g, t, 'back'); drawGrass(g, t, false); drawChest(g); drawCrab(g);
   drawList(g, buckets.near, t);
-  drawFood(g); drawBubbles(g);
+  view(g, 0.9); drawFood(g); drawBubbles(g);
   drawGrass(g, t, true);
-  g.drawImage(REEF.fg, 0, bt, W, bh);
-  drawSnow(g, true);
-  drawGrade(g);
+  view(g, 1.3); g.drawImage(REEF.fg, -P * 1.8, bt, W + 3.6 * P, bh);
+  view(g, 1.1); drawSnow(g, true);
+  view(g, 0); drawGrade(g);
   // light that survives the dark: fluorescence, bioluminescence, torches
   g.globalCompositeOperation = 'lighter';
-  if (TOD.night > 0.02) { g.globalAlpha = TOD.night * (0.62 + 0.1 * Math.sin(t * 0.5)); g.drawImage(REEF.fluo, 0, bt, W, bh); g.globalAlpha = 1; }
+  view(g, REEF_FRONT);
+  if (TOD.night > 0.02) { g.globalAlpha = TOD.night * (0.62 + 0.1 * Math.sin(t * 0.5)); g.drawImage(REEF.fluo, -P, bt, W + 2 * P, bh); g.globalAlpha = 1; }
   glowAnemone(g); glowChest(g);
-  for (const j of LIFE.jellies) j.glow(g);
-  if (VIS.active && VIS.active.glow) VIS.active.glow(g);
-  drawSparks(g);
+  for (const j of LIFE.jellies) { view(g, par(j.z)); j.glow(g); }
+  if (VIS.active && VIS.active.glow) { view(g, par(VIS.active.z)); VIS.active.glow(g); }
+  view(g, 0.8); drawSparks(g);
   g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
-  g.drawImage(ENV.vignette, 0, 0, W, H);
+  view(g, 0); g.drawImage(ENV.vignette, 0, 0, W, H);
   placeLabel(g);
 }
 
@@ -183,7 +188,7 @@ function pickAt(x, y) {
   const cands = [...FISH.list, ...LIFE.jellies, EEL_ENT, ANEMONE_ENT, MORAY, CRAB];
   if (FISH.seahorse) cands.push(FISH.seahorse);
   if (VIS.active) cands.push(VIS.active);
-  for (const e of cands) { const h = e.hit(x, y); if (h >= 0) { const s = h + e.z * 0.8; if (s < bs) { bs = s; best = e; } } }
+  for (const e of cands) { const f = par(e.z), h = e.hit(x - CAM.x * f, y - CAM.y * f); if (h >= 0) { const s = h + e.z * 0.8; if (s < bs) { bs = s; best = e; } } }
   return best;
 }
 cv.addEventListener('pointerdown', (ev) => {
@@ -196,7 +201,7 @@ cv.addEventListener('pointerdown', (ev) => {
 const body = document.body;
 let idleTimer = 0, dockHover = false;
 function wake() { body.classList.remove('idle'); clearTimeout(idleTimer); idleTimer = setTimeout(() => { if (!dockHover) { body.classList.add('idle'); body.classList.remove('open'); capEl.classList.remove('show'); tagEl.classList.remove('show'); LABEL.ent = null; } }, 3800); }
-addEventListener('pointermove', wake, { passive: true });
+addEventListener('pointermove', (e) => { CAM.px = (e.clientX / W - 0.5) * 2; CAM.py = (e.clientY / H - 0.5) * 2; wake(); }, { passive: true });
 addEventListener('keydown', (e) => {
   wake();
   if (e.target.closest && e.target.closest('button')) return;

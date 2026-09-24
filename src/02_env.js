@@ -214,7 +214,8 @@ function buildCausticFrames() {
 
 function drawCaustics(g, t) {
   if (!REEF.mask || !ENV.cFrames.length) return;
-  const inten = 0.36 * TOD.day + 0.05 * TOD.night;
+  // the 3D mode's mask follows the surfaces' real slope, so it can take stronger light
+  const inten = (FGL.on ? 0.46 : 0.36) * TOD.day + 0.05 * TOD.night;
   if (inten < 0.02) return;
   const L = ENV.cLayer, lg = L.getContext('2d');
   const F = ENV.cFrames.length, ft = (t * (REDUCED ? 3 : 7)) % F, i0 = Math.floor(ft), fr = ft - i0;
@@ -228,17 +229,18 @@ function drawCaustics(g, t) {
   lg.globalCompositeOperation = 'lighter'; lg.globalAlpha = fr;
   pb.setTransform(m); lg.fillStyle = pb; lg.fillRect(0, 0, L.width, L.height);
   lg.globalAlpha = 1; lg.globalCompositeOperation = 'destination-in';
-  lg.drawImage(REEF.mask, 0, 0, L.width, L.height);
+  lg.drawImage(reefLayer('mask'), 0, 0, L.width, L.height);
   lg.globalCompositeOperation = 'source-over';
   g.globalCompositeOperation = 'lighter'; g.globalAlpha = inten;
-  g.drawImage(L, 0, REEF.bandTop, W, H - REEF.bandTop);
+  g.drawImage(L, -CAM.pad, REEF.bandTop, W + 2 * CAM.pad, H - REEF.bandTop);
   g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 }
 
 /* ---------- grading and lens ---------- */
 function drawGrade(g) {
   const n = TOD.night, w = TOD.warm;
-  let top = mixRGB([255, 255, 255], [62, 86, 142], n), bot = mixRGB([196, 214, 232], [22, 34, 72], n);
+  // in 3D mode the water itself does the colouring by day, so the floor is only darkened, not tinted blue
+  let top = mixRGB([255, 255, 255], [62, 86, 142], n), bot = mixRGB(FGL.on ? [222, 228, 234] : [196, 214, 232], [22, 34, 72], n);
   top = mixRGB(top, [255, 190, 150], w * 0.75); bot = mixRGB(bot, [112, 96, 150], w * 0.6);
   const gr = g.createLinearGradient(0, 0, 0, H);
   gr.addColorStop(0, rgbStr(top)); gr.addColorStop(1, rgbStr(bot));
