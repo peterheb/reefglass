@@ -63,7 +63,7 @@ const EEL_ENT = { z: 0.2, info: { name: 'Spotted garden eel', sci: 'Heteroconger
   hit(x, y) { const b = REEF.eelBed; if (!b) return -1; return x > b.x0 - U * 2 && x < b.x1 + U * 2 && y > H * 0.8 && y < H * 0.97 ? 0.8 : -1; }, anchor() { const b = REEF.eelBed; return [(b.x0 + b.x1) / 2, H * 0.84]; } };
 const ANEMONE_ENT = { z: 0.215, info: { name: 'Bubble-tip anemone', sci: 'Entacmaea quadricolor', fact: 'Home base for the clownfish. Its stinging tentacles swell into bulbs at the tips.' },
   hit(x, y) { const A = LIFE.anemone; if (!A) return -1; const d = Math.hypot(x - A.x, (y - (A.y - U * 1.5)) * 1.3); return d < A.R * 1.3 ? 0.9 : -1; }, anchor() { const A = LIFE.anemone; return [A.x, A.y - U * 3]; },
-  draw(g) { drawAnemone(g, CLOCK.t, 'front'); } };
+  draw(g) { drawAnemone(g, CLOCK.t, 'front'); }, glJobs(t) { return [anemoneJob(this, false, t)]; } };
 
 /* ---------------- labels & captions ---------------- */
 const tagEl = document.getElementById('tag'), capEl = document.getElementById('caption');
@@ -120,7 +120,7 @@ function render(t) {
   if (LIFE.anemone) all.push(ANEMONE_ENT);
   for (const e of all) (e.z > 0.62 ? buckets.far : e.z > 0.3 ? buckets.mid : buckets.near).push(e);
   for (const b of Object.values(buckets)) b.sort((a, c) => c.z - a.z);
-  updateRays(t); fglPrepare(all, t);
+  updateRays(t); fglPrepare(all.concat(fglResidents()), t);
   const bt = REEF.bandTop, bh = H - bt;
   drawList(g, buckets.far, t);
   view(g, 0.4); drawRays(g);

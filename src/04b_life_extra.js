@@ -13,15 +13,26 @@ function updateMoray(dt) {
   for (const d of LIFE.danger) if (d.scare !== false && Math.hypot(d.x - c.x, d.y - c.y) < d.r * 0.8) tgt = Math.min(tgt, 0.15);
   MORAY.ext = ease(MORAY.ext, tgt, tgt < MORAY.ext ? 2.5 : 0.45, dt);
 }
-function drawMoray(g) {
-  const c = REEF.cave; if (!c || MORAY.ext < 0.03) return;
-  const t = MORAY.t, d = MORAY.dir, L = U * 10 * MORAY.ext, n = 12, pts = [];
+// the moray's centre line, from inside the cave to its head
+function morayLine() {
+  const c = REEF.cave, t = MORAY.t, d = MORAY.dir, L = U * 10 * MORAY.ext, n = 12, pts = [];
   let x = c.x - d * c.r * 0.4, y = c.y + c.r * 0.25;
   for (let i = 0; i <= n; i++) {
     const s = i / n; pts.push([x, y]);
     const a = (d > 0 ? -0.22 : Math.PI + 0.22) + d * (0.32 * Math.sin(t * 0.7 + s * 3) * s - 0.25 * s);
     x += Math.cos(a) * L / n; y += Math.sin(a) * L / n;
   }
+  return pts;
+}
+function caveShade(g, c) {
+  const sg = g.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r * 1.3);
+  sg.addColorStop(0, 'rgba(4,2,8,0.95)'); sg.addColorStop(0.55, 'rgba(4,2,8,0.6)'); sg.addColorStop(1, 'rgba(4,2,8,0)');
+  g.fillStyle = sg; g.beginPath(); g.ellipse(c.x, c.y, c.r * 1.3, c.r * 0.9, 0, 0, TAU); g.fill();
+}
+function drawMoray(g) {
+  const c = REEF.cave; if (!c || MORAY.ext < 0.03) return;
+  if (MORAY.glTile) { fglBlit(g, MORAY); caveShade(g, c); return; }
+  const t = MORAY.t, d = MORAY.dir, n = 12, pts = morayLine();
   const w = U * 1.55;
   g.lineCap = 'round'; g.lineJoin = 'round';
   g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])));
@@ -40,10 +51,7 @@ function drawMoray(g) {
   g.fillStyle = '#f2ecd8'; for (let k = 0; k < 4; k++) { g.beginPath(); g.moveTo(w * (0.45 + k * 0.2), 0); g.lineTo(w * (0.5 + k * 0.2), w * 0.08); g.lineTo(w * (0.55 + k * 0.2), 0); g.fill(); }
   eye(g, w * 0.95, -w * 0.33, w * 0.12, '#d8c040');
   g.restore();
-  // the cave mouth keeps the far end in shadow
-  const sg = g.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r * 1.3);
-  sg.addColorStop(0, 'rgba(4,2,8,0.95)'); sg.addColorStop(0.55, 'rgba(4,2,8,0.6)'); sg.addColorStop(1, 'rgba(4,2,8,0)');
-  g.fillStyle = sg; g.beginPath(); g.ellipse(c.x, c.y, c.r * 1.3, c.r * 0.9, 0, 0, TAU); g.fill();
+  caveShade(g, c);   // the cave mouth keeps the far end in shadow
   MORAY.hx = hx; MORAY.hy = hy;
 }
 MORAY.hit = (x, y) => (MORAY.ext > 0.3 && Math.hypot(x - MORAY.hx, y - MORAY.hy) < U * 4 ? 0.6 : -1);
@@ -62,10 +70,18 @@ function updateCrab(dt) {
   if (Math.random() < dt * 0.12) CRAB.pause = rand(1.5, 5);
   if (CRAB.x < W * 0.03 || CRAB.x > W * 0.97) { CRAB.dir *= -1; CRAB.x = clamp(CRAB.x, W * 0.03, W * 0.97); }
 }
+// the borrowed shell, in units of the crab's size
+function paintCrabShell(g) {
+  const sg = g.createLinearGradient(0, -0.8, 0, 0.1); sg.addColorStop(0, '#f0c48a'); sg.addColorStop(1, '#9a5a2a');
+  g.fillStyle = sg; g.beginPath(); g.moveTo(0.35, 0.05); g.quadraticCurveTo(0.4, -0.7, -0.1, -0.72); g.quadraticCurveTo(-0.7, -0.6, -0.85, -0.2); g.quadraticCurveTo(-0.4, 0.12, 0.35, 0.05); g.fill();
+  g.strokeStyle = 'rgba(110,60,30,0.7)'; g.lineWidth = 0.04;
+  for (let k = 0; k < 4; k++) { g.beginPath(); g.arc(-0.3 + k * 0.02, -0.28, 0.12 + k * 0.12, Math.PI * 0.9, Math.PI * 1.9); g.stroke(); }
+}
 function drawCrab(g) {
   const s = U * 2.4, walking = CRAB.pause <= 0 && CRAB.hide <= 0, out = CRAB.hide > 0 ? 0 : 1, t = CRAB.t;
   g.save(); g.translate(CRAB.x, CRAB.y); g.scale(CRAB.dir, 1);
   contactShadow(g, 0, s * 0.15, s * 1.1);
+  if (CRAB.glTile) { g.restore(); fglBlit(g, CRAB); return; }
   if (out) {
     g.strokeStyle = '#b8402a'; g.lineCap = 'round';
     for (let i = 0; i < 3; i++) {

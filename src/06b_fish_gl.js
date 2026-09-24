@@ -41,6 +41,7 @@ uniform vec2 uHalf, uGulp, uFish; uniform float uScale, uPX, uDepth, uPitch, uYa
 uniform float uPhase, uAmp, uAxis, uFinAmp;
 uniform vec4 uPart;     // hinge x, y, z; w = 1 for a rigid part, 0 for the body
 uniform vec3 uPartRot;  // in-plane tilt, splay (about the part's y axis), roll (about its x axis)
+uniform vec3 uPartS;    // part scale, applied before its rotation
 uniform vec3 uFlap;     // wing flap: amplitude, phase, rigid half-width
 out vec2 vUV, vWorld, vBody; out vec3 vN, vT, vB; out float vFin, vSide;
 // travelling wave, growing toward the tail, plus a small counter-swing of the head (recoil)
@@ -64,7 +65,7 @@ void main() {
   b = length(b) > 0.05 ? normalize(b) : normalize(cross(n, vec3(1.0, 0.0, 0.0)));
   vSide = aNrm.z < 0.0 ? -1.0 : 1.0;
   if (uPart.w > 0.5) {
-    p = part(p) + uPart.xyz; n = part(n); t = part(t); b = part(b);
+    p = part(p * uPartS) + uPart.xyz; n = part(normalize(n / uPartS)); t = part(t); b = part(b);
     float d = bend(uPart.x);
     if (uAxis > 0.5) p.y += d; else p.z += d;
   } else {
@@ -92,7 +93,7 @@ const FGL_FISH_FS = `#version 300 es
 precision highp float;
 in vec2 vUV, vWorld, vBody; in vec3 vN, vT, vB; in float vFin, vSide;
 uniform sampler2D uTex, uBg; uniform vec2 uTexel;
-uniform float uDist, uCaus, uTime, uU, uDay, uSunX, uW, uH, uSSS, uBump;
+uniform float uDist, uCaus, uTime, uU, uDay, uSunX, uW, uH, uSSS, uBump, uGlass;
 uniform vec4 uMat;   // body roughness, fin roughness, scale size (body lengths; 0 = none), iridescence
 uniform vec3 uTint, uEye;   // uEye: the painted eye (x, y, radius) in body units; radius 0 = none
 uniform vec4 uRay[15]; uniform float uRayA[15]; uniform int uRayN;   // light shafts: top x, angle, width, length; strength
@@ -175,7 +176,9 @@ void main() {
   // along the view ray the water absorbs the colour (red first) and replaces it with the water behind
   vec3 T = exp(-uDist * vec3(1.8, 0.85, 0.65));
   col = shoulder(col) * T + lin(texture(uBg, vWorld / vec2(uW, uH)).rgb) * (1.0 - T);
-  o = vec4(srgb(col) * tex.a, tex.a);
+  // glassy bodies (jellyfish) are clear face-on and denser toward their rim
+  float A = uGlass > 0.0 ? clamp(tex.a + pow(1.0 - NoV, 2.0) * uGlass, 0.0, 1.0) : tex.a;
+  o = vec4(srgb(col) * A, A);
 }`;
 
 /* ---------- reef relight ---------- */
@@ -389,9 +392,9 @@ function fglQuad(o) {
 
 // an ellipsoid centred at (cx, cy), textured by longitude/latitude
 function fglEllipsoid(rx, ry, rz, o = {}) {
-  const V = [], I = [], NU = 28, NV = 16, cx = o.cx || 0, cy = o.cy || 0, tex = o.tex || FGL.white;
+  const V = [], I = [], NU = 28, NV = 16, cx = o.cx || 0, cy = o.cy || 0, tex = o.tex || FGL.white, span = o.half ? 0.5 : 1;
   for (let j = 0; j <= NV; j++) {
-    const th = (j / NV) * Math.PI;
+    const th = (j / NV) * Math.PI * span;
     for (let i = 0; i <= NU; i++) {
       const ph = (i / NU) * TAU, ex = Math.sin(th) * Math.cos(ph), ey = -Math.cos(th), ez = Math.sin(th) * Math.sin(ph);
       const n = [ex / rx, ey / ry, ez / rz], l = Math.hypot(...n);
@@ -439,13 +442,19 @@ function fglPose(p = {}) {
 // draw a mesh as the body (part = null) or as a rigid part { x, y, z, tilt, splay, roll } on a hinge
 function fglDraw(m, part = null, nearFirst = true, mat = m.mat) {
   const gl = FGL.gl, u = FGL.fish.u, t = mat.tint || [1, 1, 1];
-  if (part) { gl.uniform4f(u.uPart, part.x || 0, part.y || 0, part.z || 0, 1); gl.uniform3f(u.uPartRot, part.tilt || 0, part.splay || 0, part.roll || 0); }
-  else gl.uniform4f(u.uPart, 0, 0, 0, 0);
+  if (part) {
+    gl.uniform4f(u.uPart, part.x || 0, part.y || 0, part.z || 0, 1); gl.uniform3f(u.uPartRot, part.tilt || 0, part.splay || 0, part.roll || 0);
+    gl.uniform3f(u.uPartS, part.sx || 1, part.sy || 1, part.sz || 1);
+  } else gl.uniform4f(u.uPart, 0, 0, 0, 0);
   gl.uniform4f(u.uMat, mat.rough ?? 0.35, mat.finRough ?? 0.6, mat.scale ?? 0, mat.iri ?? 0); gl.uniform1f(u.uSSS, mat.sss ?? 0.5);
   gl.uniform3f(u.uTint, t[0], t[1], t[2]); gl.uniform2f(u.uTexel, m.texel[0], m.texel[1]);
   if (m.eye && !part) gl.uniform3f(u.uEye, m.eye[0], m.eye[1], m.eye[2]); else gl.uniform3f(u.uEye, 0, 0, 0);
   gl.bindTexture(gl.TEXTURE_2D, m.tex); gl.bindVertexArray(m.vao);
-  if (m.half) {   // two-sided mesh: the sheet facing us claims depth first
+  if (mat.glass) {  // see-through: far faces first, then near ones, without hiding what lies behind
+    gl.uniform1f(u.uGlass, mat.glass); gl.depthMask(false); gl.enable(gl.CULL_FACE);
+    for (const f of [gl.FRONT, gl.BACK]) { gl.cullFace(f); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_SHORT, 0); }
+    gl.disable(gl.CULL_FACE); gl.depthMask(true); gl.uniform1f(u.uGlass, 0);
+  } else if (m.half) {   // two-sided mesh: the sheet facing us claims depth first
     gl.drawElements(gl.TRIANGLES, m.half, gl.UNSIGNED_SHORT, nearFirst ? 0 : m.half * 2);
     gl.drawElements(gl.TRIANGLES, m.half, gl.UNSIGNED_SHORT, nearFirst ? m.half * 2 : 0);
   } else gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_SHORT, 0);
@@ -484,7 +493,7 @@ function fglPrepare(list, t) {
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, FGL.bg); gl.uniform1i(u.uBg, 1);
   gl.activeTexture(gl.TEXTURE0); gl.uniform1i(u.uTex, 0);
   gl.uniform1f(u.uTime, t); gl.uniform1f(u.uU, U); gl.uniform1f(u.uW, W); gl.uniform1f(u.uH, H);
-  gl.uniform1f(u.uSunX, ENV.sunX); gl.uniform1f(u.uDay, TOD.day); gl.uniform1f(u.uBump, 0.5);
+  gl.uniform1f(u.uSunX, ENV.sunX); gl.uniform1f(u.uDay, TOD.day); gl.uniform1f(u.uBump, 0.5); gl.uniform1f(u.uGlass, 0);
   const rays = (ENV.rayNow || []).slice(0, 15), RA = new Float32Array(60), RK = new Float32Array(15);
   rays.forEach((q, i) => { RA.set([q.x, q.ang, q.r.w, q.r.len], i * 4); RK[i] = q.aDay + q.aNight * 0.5; });
   gl.uniform4fv(u['uRay[0]'], RA); gl.uniform1fv(u['uRayA[0]'], RK); gl.uniform1i(u.uRayN, rays.length);

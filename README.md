@@ -52,6 +52,7 @@ concatenated in the order listed in build.sh.
 | 06b_fish_gl.js | WebGL2 3D: meshes inflated from the painters (`fglMesh`), fin/flipper parts, tubes and ellipsoids, PBR shading, swimming (body wave, head recoil, fin ripple, banking), per-model tiles blitted into the 2D scene, fish + seahorse rigs, and the one-time normal-mapped relight of the reef layers. `G` toggles it |
 | 07/08_visitors*.js | special visitors + schedule (`VISITORS`, `summonVisitor`, `updateVisitors`) |
 | 08b_visitors_gl.js | 3D rigs for the visitors (`glJobs` per class, posed to match each 2D `draw()`) |
+| 08c_residents_gl.js | 3D for the residents: anemone (tube tentacles), seagrass ribbons, garden eels, moray, hermit crab, treasure chest (box + hinged lid), jellyfish (glassy bell) |
 | 09_main.js | WebAudio, tap-to-identify labels, captions, render pipeline, input, resize, boot |
 
 ## Conventions
