@@ -35,6 +35,13 @@ function paintSand(g, mg) {
     path(sp * 0.22); g.strokeStyle = `rgba(90,66,40,${0.08 + t * 0.1})`; g.lineWidth = sp * 0.16; g.stroke();
     y += sp * srand(0.8, 1.2);
   }
+  for (let i = 0; i < W / 45; i++) {
+    const x = srand(W), y = srand(sandY(x) + U * 0.6, H), s = U * srand(0.18, 0.5) * lerp(0.6, 1.3, (y - top) / (H - top));
+    const c = spick([[150, 140, 128], [120, 108, 96], [178, 168, 150], [96, 92, 90]]);
+    g.fillStyle = 'rgba(40,30,20,0.25)'; g.beginPath(); g.ellipse(x + s * 0.2, y + s * 0.35, s * 1.1, s * 0.45, 0, 0, TAU); g.fill();
+    const pg = g.createRadialGradient(x - s * 0.3, y - s * 0.3, s * 0.1, x, y, s); pg.addColorStop(0, rgbStr(mixRGB(c, [255, 250, 240], 0.35))); pg.addColorStop(1, rgbStr(mixRGB(c, [30, 26, 22], 0.35)));
+    g.fillStyle = pg; g.beginPath(); g.ellipse(x, y, s, s * 0.62, srand(-0.4, 0.4), 0, TAU); g.fill();
+  }
   const n = (W * (H - top)) / 26;
   for (let i = 0; i < n; i++) {
     const r = SR();

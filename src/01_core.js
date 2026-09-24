@@ -109,6 +109,23 @@ function makeGlow(r, stops) {
 const depthScale = (z) => 1 - 0.56 * z;
 const depthFog = (z) => clamp(0.04 + 0.78 * Math.pow(z, 1.15), 0, 0.86);
 
+/* ---------- underwater current ---------- */
+// one slow, gusting flow along +x, in U per second; each kind of thing responds according to its drag
+const CURRENT = { v: 0 };
+function updateCurrent(t) { CURRENT.v = (REDUCED ? 0.5 : 1) * (0.55 + 0.35 * Math.sin(t * 0.045) + 0.25 * Math.sin(t * 0.13 + 1.7) + 0.1 * Math.sin(t * 0.37 + 0.4)); }
+
+/* ---------- camera parallax ---------- */
+// The viewer's head drifts (or follows the pointer); nearer layers slide further than distant ones.
+const CAM = { x: 0, y: 0, px: null, py: null, pad: 0 };
+const par = (z) => lerp(1, 0.2, clamp(z ?? 0.3, 0, 1));
+function updateCam(dt, t, following) {
+  let tx = Math.sin(t * 0.07) * 0.7 + Math.sin(t * 0.029 + 1.3) * 0.3, ty = Math.sin(t * 0.05 + 2) * 0.3;
+  if (following && CAM.px !== null) { tx = CAM.px; ty = CAM.py; }
+  const A = REDUCED ? 0 : U * 2.2;
+  CAM.x = ease(CAM.x, -tx * A, 1.2, dt); CAM.y = ease(CAM.y, -ty * A * 0.5, 1.2, dt);
+  CAM.pad = A * 1.3 + 2;   // layers are drawn this much oversize so their edges never show
+}
+
 /* ---------- time of day ---------- */
 const CYCLE_SECONDS = 420;          // one full day in "Cycle" mode
 const TOD = { mode: 'live', phase: 0.12, day: 1, warm: 0, night: 0, moon: 1, label: 'Midday' };

@@ -114,7 +114,8 @@ class Fish {
     if (this.y < top) this.vy += (top - this.y) * 3 * dt;
     if (this.y > fl) this.vy -= (this.y - fl) * 4 * dt;
     if (this.x < -W * 0.2) this.vx += U * 8 * dt; if (this.x > W * 1.2) this.vx -= U * 8 * dt;
-    this.x += this.vx * dt; this.y += this.vy * dt;
+    this.x += (this.vx + CURRENT.v * U * 0.12 * depthScale(this.z)) * dt;
+    this.y += (this.vy + Math.sin(this.age * (0.6 + (this.seed % 0.5)) + this.seed) * U * 0.12) * dt;
     this.z = ease(this.z, this.tz, this.flee > 0 ? 1.2 : 0.25, dt);
     // orientation
     if (this.vx * this.dir < -U * 0.35 * depthScale(this.z) && this.turnCd <= 0) { this.dir = -this.dir; this.turnCd = 0.7; }
@@ -123,7 +124,7 @@ class Fish {
     this.pitch = ease(this.pitch, pt, 4, dt);
     this.speed = Math.hypot(this.vx, this.vy);
     const eff = clamp(this.speed / (cruise + 1), 0.25, 2.2);
-    this.phase += dt * TAU * sw.tailHz * (0.35 + 0.75 * eff) * (night ? 0.7 : 1);
+    this.phase += dt * TAU * sw.tailHz * (0.9 + 0.2 * ((this.seed * 7.13) % 1)) * (0.35 + 0.75 * eff) * (night ? 0.7 : 1);
     this.pecPh += dt * TAU * (sw.pecHz ?? 2.5) * (0.6 + 0.4 * eff);
     if (TOD.night > 0.3 && this.speed > U * 2 && Math.random() < dt * this.speed / U * 0.25) spark(this.x - this.dir * this.px * 0.5, this.y + rand(-2, 2), 0.7);
   }
@@ -192,6 +193,21 @@ class Seahorse {
   }
   hit(x, y) { if (this.x === undefined) return -1; const r = U * 4.5; return dist2(x, y, this.x, this.y) < r * r ? Math.sqrt(dist2(x, y, this.x, this.y)) / r : -1; }
   anchor() { return [this.x, this.y - U * 3]; }
+}
+
+let SHADOW = null;
+function drawShadows(g) {
+  const day = TOD.day; if (day < 0.05) return;
+  if (!SHADOW) SHADOW = makeGlow(32, [[0, 'rgba(6,14,28,0.85)'], [0.55, 'rgba(6,14,28,0.35)'], [1, 'rgba(6,14,28,0)']]);
+  const ents = FISH.list.map((f) => [f.x, f.y, f.px, f.z]);
+  const v = VIS.active; if (v && v.k && v.x !== undefined && !v.pod) ents.push([v.x, v.y, v.k * 0.7, v.z]);
+  for (const [x, y, len, z] of ents) {
+    if (z > 0.45) continue;                             // fish behind the front reef would shade reef we barely see
+    const top = reefTopAt(x), h = top - y; if (h < 0 || h > H * 0.4) continue;
+    const k = 1 - h / (H * 0.4), sx = x + (x - ENV.sunX) / H * h * 0.6, w = len * (0.9 + (1 - k) * 0.8);
+    g.globalAlpha = 0.32 * day * k * k; g.drawImage(SHADOW, sx - w / 2, reefTopAt(sx) - w * 0.1, w, w * 0.26);
+  }
+  g.globalAlpha = 1;
 }
 
 function makeSchool(ids, n, zc) {

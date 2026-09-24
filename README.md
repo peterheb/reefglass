@@ -41,7 +41,7 @@ concatenated in the order listed in build.sh.
 | File | What it holds |
 |---|---|
 | 00_head.html | <title>, CSS, dock/caption/tag markup |
-| 01_core.js | utils, seeded RNG, noise, canvas sizing, `Sprite` (mips + fog silhouette), depth, time of day, perf governor |
+| 01_core.js | utils, seeded RNG, noise, canvas sizing, `Sprite` (mips + fog silhouette), depth, underwater current, parallax camera, time of day, perf governor |
 | 02_env.js | background water & distant ridges, light rays, surface shimmer, caustics, grading, vignette, glow sprites |
 | 03a_reef_paint.js | painters: rock mounds, corals, sponges, clams, starfish, shells (painted once into layers) |
 | 03b_reef_build.js | reef layout, back/front/foreground layers, fluorescence layer, caustic mask, heightmap, anchors |

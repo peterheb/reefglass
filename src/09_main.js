@@ -148,7 +148,7 @@ function render(t) {
 let clockTick = 0;
 const clockEl = document.getElementById('clock');
 function update(dt, t) {
-  updateTOD(dt);
+  updateTOD(dt); updateCurrent(t); updateCam(dt, t, !body.classList.contains('idle'));
   LIFE.danger.length = 0;
   updateVisitors(dt, t);
   updateSchools(dt);

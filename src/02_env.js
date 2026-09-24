@@ -150,6 +150,18 @@ function drawSurface(g, t) {
   gr.addColorStop(0, `rgba(235,255,252,${0.5 * lum})`); gr.addColorStop(0.35, `rgba(170,240,245,${0.16 * lum})`); gr.addColorStop(1, 'rgba(120,220,240,0)');
   g.fillStyle = gr; g.fillRect(0, 0, W, H * 0.1);
   g.globalCompositeOperation = 'lighter';
+  // the underside of the waves: two drifting ripple patterns, squashed by the grazing view and fading with distance below
+  if (ENV.cFrames.length) {
+    const F = ENV.cFrames.length, band = H * 0.075, S = ENV.cFrames[0].height;
+    for (const [dir, sp, a, tw] of [[1, 0.9, 0.17, U * 23], [-1, 0.55, 0.11, U * 37]]) {   // unequal tiles, so the repeats never line up
+      const fr = ENV.cFrames[Math.floor(t * 5 * sp) % F], off = ((t * U * 2.4 * sp * dir) % tw + tw) % tw;
+      for (const [y0, y1, k] of [[0, 0.35, 1], [0.35, 0.65, 0.55], [0.65, 1, 0.2]]) {
+        g.globalAlpha = a * k * lum;
+        for (let x = -tw + off; x < W + tw; x += tw) g.drawImage(fr, 0, S * y0, S, S * (y1 - y0), x, band * y0, tw, band * (y1 - y0));
+      }
+    }
+    g.globalAlpha = 1;
+  }
   // travelling wave lines
   for (let k = 0; k < 4; k++) {
     const y0 = H * (0.012 + k * 0.011), amp = H * (0.004 + k * 0.0015), sp = 0.35 + k * 0.17;

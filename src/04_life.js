@@ -75,7 +75,7 @@ function drawGrass(g, t, front) {
       for (let i = 0; i <= n; i++) {
         pts.push([x, y, a]);
         const s = i / n;
-        a += (0.08 * Math.sin(t * 1.1 - x * 0.01 + b.ph) + 0.05 * Math.sin(t * 2.6 + b.ph + i * 0.5) + 0.035) * (0.4 + s * 1.2);
+        a += (0.08 * Math.sin(t * 1.1 - x * 0.01 + b.ph) + 0.05 * Math.sin(t * 2.6 + b.ph + i * 0.5) + 0.01 + CURRENT.v * 0.04) * (0.4 + s * 1.2);
         x += Math.cos(a) * seg; y += Math.sin(a) * seg;
       }
       b.pts = pts;
@@ -181,7 +181,7 @@ function drawChest(g) {
 function glowChest(g) { const c = LIFE.chest; if (!c || c.open < 0.05) return; g.globalAlpha = c.open * (0.35 + 0.5 * TOD.night); const s = U * 12; g.drawImage(GLOW.warm, c.x - s / 2, c.y - U * 3.6 - s / 2, s, s); g.globalAlpha = 1; }
 
 /* ---------- bubbles ---------- */
-function spawnBubble(x, y, r) { if (LIFE.bubbles.length < 420) LIFE.bubbles.push({ x, y, r, ph: rand(TAU), wf: rand(2, 5), pop: 0 }); }
+function spawnBubble(x, y, r) { if (LIFE.bubbles.length < 420) LIFE.bubbles.push({ x, y, r, ph: rand(TAU), wf: rand(2, 5), vf: rand(0.82, 1.2), pop: 0 }); }
 function updateBubbles(dt) {
   const v = REEF.vent;
   if (v) { LIFE.ventT -= dt; if (LIFE.ventT < 0) { LIFE.ventT = Math.random() < 0.08 ? 0.02 : rand(0.1, 0.35); spawnBubble(v.x + rand(-2, 2), v.y, U * rand(0.1, 0.32)); } }
@@ -189,10 +189,16 @@ function updateBubbles(dt) {
   for (let i = LIFE.bubbles.length - 1; i >= 0; i--) {
     const b = LIFE.bubbles[i];
     if (b.pop > 0) { b.pop += dt * 3; if (b.pop > 1) LIFE.bubbles.splice(i, 1); continue; }
-    b.y -= (U * 3.5 + b.r * 9) * dt;
-    b.x += Math.sin(b.y * 0.03 + b.ph) * b.r * 1.4 * dt * b.wf;
-    b.r *= 1 + 0.03 * dt;
-    if (b.y < surf) b.pop = 0.01;
+    b.y -= (U * 3.5 + b.r * 9) * b.vf * dt;
+    b.x += Math.sin(b.y * 0.03 + b.ph) * b.r * 1.4 * dt * b.wf + CURRENT.v * U * 0.45 * dt;
+    b.r *= 1 + 0.03 * dt;   // expands as the pressure drops
+    if (b.y < surf || (b.r < U * 0.2 && Math.random() < dt * 0.015)) b.pop = 0.01;
+  }
+  // bubbles that touch coalesce into one of the combined volume
+  const B = LIFE.bubbles;
+  for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
+    const a = B[i], c = B[j]; if (a.pop || c.pop) continue;
+    if (Math.abs(a.x - c.x) < a.r + c.r && Math.abs(a.y - c.y) < (a.r + c.r) * 0.6) { a.r = Math.cbrt(a.r ** 3 + c.r ** 3); a.vf = (a.vf + c.vf) / 2; B.splice(j, 1); j--; }
   }
 }
 function drawBubbles(g) {
@@ -211,8 +217,10 @@ function initSnow() {
 }
 function updateSnow(dt, t) {
   for (const p of LIFE.snow) {
-    const sp = lerp(1.4, 0.5, p.z);
-    p.y += U * 0.35 * sp * dt; p.x += (Math.sin(t * 0.25 + p.ph) * 0.4 + 0.15) * U * sp * dt;
+    // suspended matter: carried by the current, barely sinking, each wandering on its own
+    const sp = lerp(1.4, 0.5, p.z), w = p.s * 3.1;
+    p.y += U * (0.1 + 0.22 * Math.sin(t * 0.21 * w + p.ph)) * sp * dt;
+    p.x += (CURRENT.v * 0.9 + Math.sin(t * 0.17 * w + p.ph * 2) * 0.35) * U * sp * dt;
     if (p.y > H + 10) { p.y = -10; p.x = rand(W); } if (p.x > W + 10) p.x = -10; if (p.x < -10) p.x = W + 10;
   }
 }
@@ -220,7 +228,7 @@ function drawSnow(g, near) {
   for (const p of LIFE.snow) {
     const isNear = p.z < 0.12; if (isNear !== near) continue;
     if (near) { const s = U * (1.6 + (0.12 - p.z) * 14) * p.s; g.globalAlpha = 0.07 + 0.05 * Math.sin(p.ph); g.drawImage(GLOW.soft, p.x - s / 2, p.y - s / 2, s, s); }
-    else { const s = U * lerp(0.42, 0.14, p.z) * p.s; g.globalAlpha = lerp(0.55, 0.18, p.z); g.drawImage(GLOW.dot, p.x - s / 2, p.y - s / 2, s, s); }
+    else { const s = U * lerp(0.42, 0.14, p.z) * p.s; g.globalAlpha = lerp(0.42, 0.1, p.z); g.drawImage(GLOW.dot, p.x - s / 2, p.y - s / 2, s, s); }
   }
   g.globalAlpha = 1;
 }
@@ -241,7 +249,7 @@ function updateFood(dt, t) {
   for (let i = LIFE.food.length - 1; i >= 0; i--) {
     const f = LIFE.food[i]; f.life += dt;
     if (f.rest > 0) { f.rest += dt; if (f.rest > 14) LIFE.food.splice(i, 1); continue; }
-    f.y += f.vy * dt; f.x += Math.sin(t * 1.3 + f.ph) * U * 0.6 * dt; f.rot += dt * 0.8;
+    f.y += f.vy * dt; f.x += (Math.sin(t * 1.3 + f.ph) * 0.6 + CURRENT.v * 0.4) * U * dt; f.rot += dt * 0.8;
     if (f.y >= reefTopAt(f.x) - U * 0.3) f.rest = 0.01;
   }
 }
