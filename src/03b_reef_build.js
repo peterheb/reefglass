@@ -171,6 +171,7 @@ function buildReef() {
   for (let c = 0; c < cols; c++) { let r = 0; while (r < rows && hd[(r * cols + c) * 4 + 3] < 140) r++; REEF.top[c] = REEF.bandTop + r * st; }
 
   REEF.back = back; REEF.front = front; REEF.fg = fore; REEF.fluo = fl; REEF.mask = mask;
+  REEF.lit = fglRelight(back, front);
   const cl = mk(W * PX * 0.38, (H - REEF.bandTop) * PX * 0.38); cl.scale = PX * 0.38; ENV.cLayer = cl; ENV.cPats = [];
   FL = null; MK = null;
 }

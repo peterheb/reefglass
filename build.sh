@@ -4,7 +4,7 @@
 #   dist/index.html  – complete standalone document, deployed to reefglass.fish
 set -e
 cd "$(dirname "$0")"
-JS="src/01_core.js src/02_env.js src/03a_reef_paint.js src/03b_reef_build.js src/04_life.js src/04b_life_extra.js src/05a_fish_paint.js src/05b_fish_paint.js src/06_fish.js src/07_visitors_a.js src/08_visitors_b.js src/09_main.js"
+JS="src/01_core.js src/02_env.js src/03a_reef_paint.js src/03b_reef_build.js src/04_life.js src/04b_life_extra.js src/05a_fish_paint.js src/05b_fish_paint.js src/06_fish.js src/06b_fish_gl.js src/07_visitors_a.js src/08_visitors_b.js src/08b_visitors_gl.js src/09_main.js"
 body() {
   cat src/00_head.html
   printf '\n<script>\n'

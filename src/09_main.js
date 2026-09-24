@@ -116,6 +116,7 @@ function render(t) {
   if (LIFE.anemone) all.push(ANEMONE_ENT);
   for (const e of all) (e.z > 0.62 ? buckets.far : e.z > 0.3 ? buckets.mid : buckets.near).push(e);
   for (const b of Object.values(buckets)) b.sort((a, c) => c.z - a.z);
+  updateRays(t); fglPrepare(all, t);
   const bt = REEF.bandTop, bh = H - bt;
   drawList(g, buckets.far, t);
   drawRays(g, t);
@@ -201,6 +202,7 @@ addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('button')) return;
   if (e.key === 'f' || e.key === 'F') toggleFull();
   else if (e.key === 'v' || e.key === 'V') callVisitor();
+  else if (e.key === 'g' || e.key === 'G') fglToggle();
   else if (e.key === ' ') { e.preventDefault(); feed(); }
 });
 const dock = document.getElementById('dock');
@@ -233,7 +235,7 @@ document.addEventListener('fullscreenchange', () => { const b = document.getElem
 
 /* ---------------- boot ---------------- */
 function boot() {
-  measure(); buildGlows(); buildBubbleSprite(); buildSpecies();
+  measure(); buildGlows(); buildBubbleSprite(); buildSpecies(); fglInit();
   buildEnvironment(); buildReef();
   initAnemone(); initGrass(); initEels(); initChest(); initSnow(); initJellies(); initMoray(); initCrab(); spawnFish();
   for (const j of LIFE.jellies) j.info = JELLY_INFO[j.kind];
@@ -253,5 +255,5 @@ function boot() {
   };
   requestAnimationFrame(loop);
 }
-window.reef = { summon(id) { const v = VISITORS.find((q) => q.id === id); if (v) { VIS.active = v.make(v); showCaption(v); } }, mode: setMode, feed, advance(s) { for (let i = 0; i < s * 30; i++) { CLOCK.t += 1 / 30; update(1 / 30, CLOCK.t); } } };
+window.reef = { summon(id) { const v = VISITORS.find((q) => q.id === id); if (v) { VIS.active = v.make(v); showCaption(v); } }, mode: setMode, feed, gl: fglToggle, advance(s) { for (let i = 0; i < s * 30; i++) { CLOCK.t += 1 / 30; update(1 / 30, CLOCK.t); } } };
 boot();

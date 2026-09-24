@@ -49,7 +49,9 @@ concatenated in the order listed in build.sh.
 | 04b_life_extra.js | moray in the cave, hermit crab |
 | 05a/05b_fish_paint.js | fish species sprites (body/tail/pectoral painted in body-length units) + seahorse |
 | 06_fish.js | `Fish` behaviour (cruise, picker, hover, home, bottom, school/boids, feeding, fleeing, night rest) |
+| 06b_fish_gl.js | WebGL2 3D: meshes inflated from the painters (`fglMesh`), fin/flipper parts, tubes and ellipsoids, PBR shading, swimming (body wave, head recoil, fin ripple, banking), per-model tiles blitted into the 2D scene, fish + seahorse rigs, and the one-time normal-mapped relight of the reef layers. `G` toggles it |
 | 07/08_visitors*.js | special visitors + schedule (`VISITORS`, `summonVisitor`, `updateVisitors`) |
+| 08b_visitors_gl.js | 3D rigs for the visitors (`glJobs` per class, posed to match each 2D `draw()`) |
 | 09_main.js | WebAudio, tap-to-identify labels, captions, render pipeline, input, resize, boot |
 
 ## Conventions
@@ -57,7 +59,7 @@ concatenated in the order listed in build.sh.
 - `z` depth: 0 = against the glass, 1 = far. Buckets: far > 0.62 > mid > 0.3 > near.
   Draw order: bg → far → rays → back reef → mid → front reef → caustics → reef life → near → fg → grade → glows.
 - Night glow is drawn after the multiply grade with 'lighter'.
-- Debug hooks: `reef.summon('shark')`, `reef.mode('night')`, `reef.feed()`, `reef.advance(seconds)`.
+- Debug hooks: `reef.summon('shark')`, `reef.mode('night')`, `reef.feed()`, `reef.advance(seconds)`, `reef.gl(false)`.
 
 ## License
 [MIT](LICENSE)

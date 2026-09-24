@@ -2,7 +2,7 @@
 defSpecies('mandarin', {
   name: 'Mandarinfish', sci: 'Synchiropus splendidus', fact: 'One of very few animals coloured by true blue pigment rather than light-scattering structures.',
   len: 4.6, res: 220, box: [1.04, 0.95], tailBox: [0.26, 0.4], tailAt: [-0.47, 0], pecBox: [0.26, 0.26], pecAt: [0.18, 0.05], pecAng: 0.2,
-  swim: { speed: 1.2, burst: 3, agility: 3.5, tailHz: 2.2, tailAmp: 0.4, hop: true }, behavior: 'bottom', zone: [0.9, 1], z: [0.12, 0.3], count: 1,
+  swim: { speed: 1.2, burst: 3, agility: 3.5, tailHz: 2.2, tailAmp: 0.4, hop: true }, behavior: 'bottom', zone: [0.9, 1], z: [0.12, 0.3], count: 1, gl: { thick: 0.6, scale: 0.01, rough: 0.22, sss: 0.4 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.04); body.bezierCurveTo(0.48, -0.1, 0.35, -0.19, 0.15, -0.18); body.bezierCurveTo(-0.15, -0.17, -0.35, -0.1, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.3, 0.12, -0.05, 0.2, 0.2, 0.19); body.bezierCurveTo(0.38, 0.18, 0.48, 0.12, 0.5, 0.06); body.closePath();
     const d1 = new Path2D(); d1.moveTo(0.14, -0.17); d1.bezierCurveTo(0.12, -0.36, 0.02, -0.46, -0.04, -0.42); d1.bezierCurveTo(-0.02, -0.3, -0.02, -0.2, -0.02, -0.16); d1.closePath();
@@ -28,7 +28,7 @@ defSpecies('mandarin', {
 defSpecies('lion', {
   name: 'Red lionfish', sci: 'Pterois volitans', fact: 'Its fin spines carry venom. Native to the Indo-Pacific, it has become invasive across the Caribbean.',
   len: 11, res: 320, box: [1.06, 1.45], tailBox: [0.3, 0.44], tailAt: [-0.47, 0], pecBox: [0.8, 0.95], pecAt: [0.16, 0.08], pecAng: 0.0,
-  swim: { speed: 1.4, burst: 5, agility: 1.2, tailHz: 1.2, tailAmp: 0.35, pecHz: 0.6 }, behavior: 'hover', zone: [0.35, 0.95], z: [0.12, 0.5], count: 1,
+  swim: { speed: 1.4, burst: 5, agility: 1.2, tailHz: 1.2, tailAmp: 0.35, pecHz: 0.6 }, behavior: 'hover', zone: [0.35, 0.95], z: [0.12, 0.5], count: 1, gl: { thick: 0.45, scale: 0.02, rough: 0.45 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.02); body.bezierCurveTo(0.46, -0.12, 0.3, -0.2, 0.1, -0.19); body.bezierCurveTo(-0.15, -0.18, -0.35, -0.1, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.3, 0.12, -0.1, 0.19, 0.12, 0.19); body.bezierCurveTo(0.32, 0.19, 0.46, 0.12, 0.5, 0.04); body.closePath();
     const soft = new Path2D(); soft.moveTo(-0.14, -0.17); soft.bezierCurveTo(-0.2, -0.36, -0.4, -0.34, -0.47, -0.07); soft.lineTo(-0.3, -0.1); soft.closePath();
@@ -67,7 +67,7 @@ defSpecies('lion', {
 defSpecies('porcupine', {
   name: 'Long-spine porcupinefish', sci: 'Diodon holocanthus', fact: 'When threatened it gulps water, swelling into a ball bristling with spines.',
   len: 8.2, res: 300, box: [1.04, 0.72], tailBox: [0.2, 0.34], tailAt: [-0.47, 0], pecBox: [0.16, 0.16], pecAt: [0.15, 0.02], pecAng: 0.1,
-  swim: { speed: 1.6, burst: 4, agility: 1.6, tailHz: 1.8, tailAmp: 0.4, pecHz: 5 }, behavior: 'hover', zone: [0.3, 0.95], z: [0.1, 0.5], count: 1,
+  swim: { speed: 1.6, burst: 4, agility: 1.6, tailHz: 1.8, tailAmp: 0.4, pecHz: 5 }, behavior: 'hover', zone: [0.3, 0.95], z: [0.1, 0.5], count: 1, gl: { thick: 0.75, scale: 0.012, rough: 0.4 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.04); body.bezierCurveTo(0.5, -0.18, 0.3, -0.27, 0.05, -0.26); body.bezierCurveTo(-0.2, -0.25, -0.38, -0.14, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.38, 0.16, -0.2, 0.28, 0.05, 0.28); body.bezierCurveTo(0.3, 0.28, 0.5, 0.2, 0.5, 0.06); body.closePath();
     const dors = new Path2D(); dors.moveTo(-0.3, -0.16); dors.bezierCurveTo(-0.34, -0.3, -0.44, -0.28, -0.47, -0.06); dors.closePath();
@@ -106,7 +106,7 @@ defSpecies('porcupine', {
 defSpecies('gramma', {
   name: 'Royal gramma', sci: 'Gramma loreto', fact: 'Under ledges it swims belly-to-the-rock — even upside down.',
   len: 4.2, res: 200, box: [1.04, 0.66], tailBox: [0.24, 0.34], tailAt: [-0.47, 0], pecBox: [0.14, 0.1], pecAt: [0.18, 0.04], pecAng: 0.3,
-  swim: { speed: 2, burst: 6, agility: 3.5, tailHz: 3.2, tailAmp: 0.5 }, behavior: 'picker', zone: [0.72, 1], z: [0.15, 0.4], count: 2,
+  swim: { speed: 2, burst: 6, agility: 3.5, tailHz: 3.2, tailAmp: 0.5 }, behavior: 'picker', zone: [0.72, 1], z: [0.15, 0.4], count: 2, gl: { thick: 0.5, scale: 0.03, rough: 0.35, iri: 0.1, sss: 0.7 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.02); body.bezierCurveTo(0.45, -0.1, 0.3, -0.15, 0.1, -0.15); body.bezierCurveTo(-0.15, -0.15, -0.35, -0.1, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.35, 0.1, -0.15, 0.15, 0.1, 0.15); body.bezierCurveTo(0.3, 0.15, 0.45, 0.1, 0.5, 0.03); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.2, -0.14); dors.bezierCurveTo(0.1, -0.27, -0.3, -0.27, -0.46, -0.07); dors.lineTo(0, -0.1); dors.closePath();
@@ -127,7 +127,7 @@ defSpecies('gramma', {
 defSpecies('parrot', {
   name: 'Steephead parrotfish', sci: 'Chlorurus microrhinos', fact: 'Crunches coral with a fused beak — much of a reef’s white sand has passed through parrotfish. Some sleep in a mucus bubble.',
   len: 13.5, res: 360, box: [1.04, 0.74], tailBox: [0.34, 0.52], tailAt: [-0.47, 0], pecBox: [0.2, 0.14], pecAt: [0.2, 0.05], pecAng: 0.3,
-  swim: { speed: 3.6, burst: 8, agility: 1.5, tailHz: 1.6, tailAmp: 0.4, pecHz: 2.2 }, behavior: 'picker', zone: [0.35, 0.97], z: [0.1, 0.6], count: 1,
+  swim: { speed: 3.6, burst: 8, agility: 1.5, tailHz: 1.6, tailAmp: 0.4, pecHz: 2.2 }, behavior: 'picker', zone: [0.35, 0.97], z: [0.1, 0.6], count: 1, gl: { thick: 0.45, scale: 0.02, rough: 0.35, iri: 0.2 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.06); body.bezierCurveTo(0.5, -0.12, 0.38, -0.22, 0.15, -0.225); body.bezierCurveTo(-0.15, -0.22, -0.38, -0.13, -0.5, -0.06); body.lineTo(-0.5, 0.06); body.bezierCurveTo(-0.38, 0.13, -0.15, 0.21, 0.15, 0.21); body.bezierCurveTo(0.38, 0.2, 0.48, 0.16, 0.5, 0.08); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.26, -0.2); dors.bezierCurveTo(0.1, -0.29, -0.3, -0.26, -0.46, -0.1); dors.lineTo(0, -0.15); dors.closePath();
@@ -169,15 +169,15 @@ function anthiasPaint(c1, c2, male) {
 }
 defSpecies('anthias', { name: 'Sea goldie', sci: 'Pseudanthias squamipinnis', fact: 'Lives in harems. If the male dies, the largest female changes sex and takes his place.',
   len: 4.3, res: 180, box: [1.04, 0.62], tailBox: [0.32, 0.46], tailAt: [-0.47, 0], pecBox: [0.12, 0.1], pecAt: [0.18, 0.04], pecAng: 0.3,
-  swim: { speed: 3.6, burst: 9, agility: 3, tailHz: 3.4, tailAmp: 0.5 }, behavior: 'school', zone: [0.35, 0.9], z: [0.25, 0.55], count: 22, ...anthiasPaint('#ff9a2a', '#ff7a1a', false) });
+  swim: { speed: 3.6, burst: 9, agility: 3, tailHz: 3.4, tailAmp: 0.5 }, behavior: 'school', zone: [0.35, 0.9], z: [0.25, 0.55], count: 22, gl: { thick: 0.4, scale: 0.035, rough: 0.3, iri: 0.3, sss: 0.8 }, ...anthiasPaint('#ff9a2a', '#ff7a1a', false) });
 defSpecies('anthiasM', { name: 'Sea goldie (male)', sci: 'Pseudanthias squamipinnis', fact: 'Males are magenta with a long third dorsal spine; each guards a harem of orange females.',
   len: 4.9, res: 180, box: [1.04, 0.9], tailBox: [0.34, 0.5], tailAt: [-0.47, 0], pecBox: [0.12, 0.1], pecAt: [0.18, 0.04], pecAng: 0.3,
-  swim: { speed: 3.6, burst: 9, agility: 3, tailHz: 3.4, tailAmp: 0.5 }, behavior: 'school', zone: [0.35, 0.9], z: [0.25, 0.55], count: 3, ...anthiasPaint('#e8409a', '#a02a8a', true) });
+  swim: { speed: 3.6, burst: 9, agility: 3, tailHz: 3.4, tailAmp: 0.5 }, behavior: 'school', zone: [0.35, 0.9], z: [0.25, 0.55], count: 3, gl: { thick: 0.4, scale: 0.035, rough: 0.3, iri: 0.3, sss: 0.8 }, ...anthiasPaint('#e8409a', '#a02a8a', true) });
 
 /* ---------------- Blue-green chromis ---------------- */
 defSpecies('chromis', { name: 'Blue-green chromis', sci: 'Chromis viridis', fact: 'Shoals hover above branching coral and dive into it at the first sign of danger.',
   len: 3.8, res: 150, box: [1.04, 0.66], tailBox: [0.3, 0.44], tailAt: [-0.47, 0], pecBox: [0.12, 0.1], pecAt: [0.18, 0.04], pecAng: 0.3,
-  swim: { speed: 3.2, burst: 8, agility: 3, tailHz: 3.6, tailAmp: 0.5 }, behavior: 'school', zone: [0.3, 0.85], z: [0.55, 0.9], count: 26,
+  swim: { speed: 3.2, burst: 8, agility: 3, tailHz: 3.6, tailAmp: 0.5 }, behavior: 'school', zone: [0.3, 0.85], z: [0.55, 0.9], count: 26, gl: { thick: 0.4, scale: 0.035, rough: 0.28, iri: 0.5, sss: 0.4 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.02); body.bezierCurveTo(0.46, -0.14, 0.3, -0.21, 0.1, -0.21); body.bezierCurveTo(-0.15, -0.2, -0.35, -0.12, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.35, 0.12, -0.15, 0.19, 0.1, 0.19); body.bezierCurveTo(0.3, 0.19, 0.46, 0.12, 0.5, 0.03); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.2, -0.2); dors.bezierCurveTo(0.1, -0.3, -0.3, -0.3, -0.46, -0.07); dors.lineTo(0, -0.1); dors.closePath();
@@ -193,7 +193,7 @@ defSpecies('chromis', { name: 'Blue-green chromis', sci: 'Chromis viridis', fact
 /* ---------------- Yellow boxfish ---------------- */
 defSpecies('boxfish', { name: 'Yellow boxfish', sci: 'Ostracion cubicus', fact: 'Armoured in a bony box, it sculls with its small fins. Stressed boxfish can release a toxin into the water.',
   len: 5.2, res: 220, box: [1.04, 0.66], tailBox: [0.22, 0.36], tailAt: [-0.44, 0], pecBox: [0.12, 0.1], pecAt: [0.16, 0.04], pecAng: 0.1,
-  swim: { speed: 1.4, burst: 3.5, agility: 2.2, tailHz: 4.5, tailAmp: 0.3, pecHz: 9 }, behavior: 'hover', zone: [0.4, 0.95], z: [0.1, 0.45], count: 1,
+  swim: { speed: 1.4, burst: 3.5, agility: 2.2, tailHz: 4.5, tailAmp: 0.3, pecHz: 9 }, behavior: 'hover', zone: [0.4, 0.95], z: [0.1, 0.45], count: 1, gl: { thick: 0.85, scale: 0.07, rough: 0.5 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.0); body.bezierCurveTo(0.5, -0.2, 0.4, -0.25, 0.2, -0.25); body.lineTo(-0.3, -0.21); body.bezierCurveTo(-0.42, -0.2, -0.46, -0.1, -0.46, -0.05); body.lineTo(-0.46, 0.05); body.bezierCurveTo(-0.46, 0.12, -0.42, 0.22, -0.3, 0.23); body.lineTo(0.2, 0.25); body.bezierCurveTo(0.4, 0.25, 0.5, 0.18, 0.5, 0.0); body.closePath();
     const dors = new Path2D(); dors.moveTo(-0.2, -0.2); dors.bezierCurveTo(-0.24, -0.3, -0.34, -0.3, -0.36, -0.2); dors.closePath();

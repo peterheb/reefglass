@@ -72,6 +72,7 @@ class Turtle extends Crosser {
   constructor(info) { super(info, Math.min(U * rand(20, 24), W * 0.42), 4.2, rand(0.22, 0.36), rand(0.26, 0.5)); this.stroke = rand(TAU); }
   update(dt) { this.stroke += dt * TAU / 3.4; this.speedU = 3.2 + 2.2 * Math.max(0, Math.sin(this.stroke)); LIFE.danger.push({ x: this.x, y: this.y, r: this.k * 0.8, scare: false }); return this.step(dt, 0.03, 0.25); }
   draw(g) {
+    if (this.glTile) return fglBlit(g, this);
     const L = 260, k = this.k, fog = depthFog(this.z);
     const shell = vspr('tShell', 1.08, 0.74, L, paintTurtleShell), head = vspr('tHead', 0.38, 0.24, L, paintTurtleHead, 0, 0.5);
     const ff = vspr('tFF', 0.72, 0.24, L, paintTurtleFlipper(0.7, 0.2), 1, 0.5), rf = vspr('tRF', 0.3, 0.16, L, paintTurtleFlipper(0.28, 0.12), 1, 0.5);
@@ -87,6 +88,35 @@ class Turtle extends Crosser {
 }
 
 /* ---------------- Reef manta (seen from below) ---------------- */
+/* the manta seen from below, in body lengths; flap sets the wing stroke */
+function paintManta(g, flap, spots) {
+  const c = Math.cos(flap), sn = Math.sin(flap), tipY = 0.5 * (0.8 + 0.2 * c), tipX = -0.13 + 0.035 * sn, lc = 0.3 + 0.05 * c;
+  g.strokeStyle = 'rgba(28,34,42,0.85)'; g.lineCap = 'round';
+  g.lineWidth = 0.008; g.beginPath(); g.moveTo(-0.24, 0); g.quadraticCurveTo(-0.4, Math.sin(flap * 2) * 0.02, -0.58, Math.sin(flap) * 0.035); g.stroke();
+  const p = new Path2D(); p.moveTo(0.2, -0.075);
+  p.bezierCurveTo(0.17, -lc * 0.8, 0.02, -tipY * 0.95, tipX, -tipY);
+  p.bezierCurveTo(-0.06, -tipY * 0.62, -0.1, -0.2, -0.17, -0.1);
+  p.quadraticCurveTo(-0.22, -0.075, -0.25, -0.03); p.lineTo(-0.25, 0.03); p.quadraticCurveTo(-0.22, 0.075, -0.17, 0.1);
+  p.bezierCurveTo(-0.1, 0.2, -0.06, tipY * 0.62, tipX, tipY);
+  p.bezierCurveTo(0.02, tipY * 0.95, 0.17, lc * 0.8, 0.2, 0.075); p.closePath();
+  const gr = g.createRadialGradient(0.05, 0, 0.02, 0.02, 0, 0.52);
+  gr.addColorStop(0, '#e6ecee'); gr.addColorStop(0.3, '#cfd8dc'); gr.addColorStop(0.62, '#7c8892'); gr.addColorStop(1, '#262f38');
+  g.fillStyle = gr; g.fill(p);
+  g.save(); g.clip(p);
+  g.fillStyle = 'rgba(30,36,44,0.55)'; for (const [x, y, r] of spots) { g.beginPath(); g.arc(x, y * 0.8, r, 0, TAU); g.fill(); }
+  g.strokeStyle = 'rgba(40,48,58,0.65)'; g.lineWidth = 0.006;
+  for (let i = 0; i < 5; i++) { const x = 0.13 - i * 0.022; for (const s2 of [-1, 1]) { g.beginPath(); g.moveTo(x, s2 * 0.045); g.quadraticCurveTo(x - 0.012, s2 * 0.07, x - 0.002, s2 * 0.095); g.stroke(); } }
+  g.restore();
+  for (const s2 of [-1, 1]) {
+    g.save(); g.translate(0.215, s2 * 0.068); g.rotate(s2 * -0.25 + Math.sin(flap * 1.3) * 0.08 * s2);
+    g.fillStyle = '#48535d'; g.beginPath(); g.ellipse(0.035, 0, 0.055, 0.02, 0, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(210,220,226,0.55)'; g.beginPath(); g.ellipse(0.03, s2 * 0.006, 0.04, 0.008, 0, 0, TAU); g.fill();
+    g.restore();
+  }
+  g.fillStyle = '#161c22'; g.fillRect(0.198, -0.052, 0.014, 0.104);
+  g.fillStyle = 'rgba(40,46,52,0.9)'; for (const s2 of [-1, 1]) { g.beginPath(); g.ellipse(-0.235, s2 * 0.045, 0.03, 0.012, s2 * 0.4, 0, TAU); g.fill(); }
+  return p;
+}
 class Manta extends Crosser {
   constructor(info) {
     super(info, Math.min(U * 36, W * 0.62), 6, rand(0.3, 0.42), rand(0.17, 0.3)); this.flap = rand(TAU);
@@ -94,33 +124,10 @@ class Manta extends Crosser {
   }
   update(dt) { this.flap += dt * TAU / 4.2; LIFE.danger.push({ x: this.x, y: this.y, r: this.k * 0.4, scare: false }); return this.step(dt, 0.025, 0.2); }
   draw(g) {
-    const S = this.k, fog = depthFog(this.z), c = Math.cos(this.flap), sn = Math.sin(this.flap);
-    const tipY = 0.5 * (0.8 + 0.2 * c), tipX = -0.13 + 0.035 * sn, lc = 0.3 + 0.05 * c;
+    if (this.glTile) return fglBlit(g, this);
+    const S = this.k, fog = depthFog(this.z);
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir * 0.5); g.scale(this.dir * S, S);
-    g.strokeStyle = 'rgba(28,34,42,0.85)'; g.lineCap = 'round';
-    g.lineWidth = 0.008; g.beginPath(); g.moveTo(-0.24, 0); g.quadraticCurveTo(-0.4, Math.sin(this.flap * 2) * 0.02, -0.58, Math.sin(this.flap) * 0.035); g.stroke();
-    const p = new Path2D(); p.moveTo(0.2, -0.075);
-    p.bezierCurveTo(0.17, -lc * 0.8, 0.02, -tipY * 0.95, tipX, -tipY);
-    p.bezierCurveTo(-0.06, -tipY * 0.62, -0.1, -0.2, -0.17, -0.1);
-    p.quadraticCurveTo(-0.22, -0.075, -0.25, -0.03); p.lineTo(-0.25, 0.03); p.quadraticCurveTo(-0.22, 0.075, -0.17, 0.1);
-    p.bezierCurveTo(-0.1, 0.2, -0.06, tipY * 0.62, tipX, tipY);
-    p.bezierCurveTo(0.02, tipY * 0.95, 0.17, lc * 0.8, 0.2, 0.075); p.closePath();
-    const gr = g.createRadialGradient(0.05, 0, 0.02, 0.02, 0, 0.52);
-    gr.addColorStop(0, '#e6ecee'); gr.addColorStop(0.3, '#cfd8dc'); gr.addColorStop(0.62, '#7c8892'); gr.addColorStop(1, '#262f38');
-    g.fillStyle = gr; g.fill(p);
-    g.save(); g.clip(p);
-    g.fillStyle = 'rgba(30,36,44,0.55)'; for (const [x, y, r] of this.spots) { g.beginPath(); g.arc(x, y * 0.8, r, 0, TAU); g.fill(); }
-    g.strokeStyle = 'rgba(40,48,58,0.65)'; g.lineWidth = 0.006;
-    for (let i = 0; i < 5; i++) { const x = 0.13 - i * 0.022; for (const s2 of [-1, 1]) { g.beginPath(); g.moveTo(x, s2 * 0.045); g.quadraticCurveTo(x - 0.012, s2 * 0.07, x - 0.002, s2 * 0.095); g.stroke(); } }
-    g.restore();
-    for (const s2 of [-1, 1]) {
-      g.save(); g.translate(0.215, s2 * 0.068); g.rotate(s2 * -0.25 + Math.sin(this.flap * 1.3) * 0.08 * s2);
-      g.fillStyle = '#48535d'; g.beginPath(); g.ellipse(0.035, 0, 0.055, 0.02, 0, 0, TAU); g.fill();
-      g.fillStyle = 'rgba(210,220,226,0.55)'; g.beginPath(); g.ellipse(0.03, s2 * 0.006, 0.04, 0.008, 0, 0, TAU); g.fill();
-      g.restore();
-    }
-    g.fillStyle = '#161c22'; g.fillRect(0.198, -0.052, 0.014, 0.104);
-    g.fillStyle = 'rgba(40,46,52,0.9)'; for (const s2 of [-1, 1]) { g.beginPath(); g.ellipse(-0.235, s2 * 0.045, 0.03, 0.012, s2 * 0.4, 0, TAU); g.fill(); }
+    const p = paintManta(g, this.flap, this.spots);
     if (fog > 0.02) { g.globalAlpha = fog; g.fillStyle = rgbStr(FOG_RGB); g.fill(p); g.globalAlpha = 1; }
     g.restore();
   }
@@ -151,6 +158,7 @@ class Shark extends Crosser {
   constructor(info) { super(info, U * rand(26, 32), 9, rand(0.28, 0.42), rand(0.3, 0.55)); this.ph2 = rand(TAU); }
   update(dt) { this.ph2 += dt * TAU * 0.8; LIFE.danger.push({ x: this.x + this.dir * this.k * 0.3, y: this.y, r: U * 42 }); return this.step(dt, 0.05, 0.22); }
   draw(g) {
+    if (this.glTile) return fglBlit(g, this);
     const L = 360, k = this.k, fog = depthFog(this.z), osc = Math.sin(this.ph2);
     const body = vspr('shBody', 1.08, 0.72, L, paintSharkBody), tail = vspr('shTail', 0.34, 0.52, L, paintSharkTail, 1, 0.52);
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir); g.scale(this.dir, 1);
@@ -195,9 +203,12 @@ class WhaleShark extends Crosser {
   draw(g) {
     const L = 520, k = this.k, fog = depthFog(this.z), osc = Math.sin(this.ph2);
     const body = vspr('wsBody', 1.06, 0.66, L, paintWhaleSharkBody), tail = vspr('wsTail', 0.26, 0.6, L, paintWhaleSharkTail, 1, 0.58);
+    if (this.glTile) fglBlit(g, this);
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir); g.scale(this.dir, 1);
-    g.save(); g.translate(-0.49 * k, 0); g.rotate(osc * 0.04); g.scale(Math.cos(osc * 0.55), 1); tail.draw(g, 0, 0, 0.26 * k, 0.6 * k, fog); g.restore();
-    body.draw(g, 0, 0, 1.06 * k, 0.66 * k, fog);
+    if (!this.glTile) {
+      g.save(); g.translate(-0.49 * k, 0); g.rotate(osc * 0.04); g.scale(Math.cos(osc * 0.55), 1); tail.draw(g, 0, 0, 0.26 * k, 0.6 * k, fog); g.restore();
+      body.draw(g, 0, 0, 1.06 * k, 0.66 * k, fog);
+    }
     // remoras riding underneath
     for (const [x, y, s] of [[0.1, 0.138, 1], [-0.08, 0.128, 0.8], [0.2, 0.128, 0.7]]) { g.fillStyle = rgbStr(mixRGB([96, 104, 112], FOG_RGB, fog)); g.beginPath(); g.ellipse(x * k, y * k, 0.03 * k * s, 0.0055 * k * s, 0.05, 0, TAU); g.fill(); g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect((x - 0.02 * s) * k, (y - 0.003 * s) * k, 0.03 * k * s, 0.002 * k); }
     // juvenile golden trevallies piloting ahead of the mouth

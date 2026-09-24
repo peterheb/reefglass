@@ -46,6 +46,7 @@ class Dolphins {
   draw(g) {
     const L = 320, body = vspr('dBody', 1.1, 0.62, L, paintDolphinBody), fl = vspr('dFluke', 0.26, 0.24, L, paintDolphinFluke, 1, 0.5);
     for (const d of [...this.pod].sort((a, b) => b.z - a.z)) {
+      if (d.glTile) { fglBlit(g, d); continue; }
       const k = d.k, fog = depthFog(d.z), osc = Math.sin(d.ph);
       g.save(); g.translate(d.x, d.y); g.scale(this.dir, 1); g.rotate(d.pitch * this.dir + osc * 0.05);
       g.save(); g.translate(-0.49 * k, 0); g.rotate(osc * 0.45); fl.draw(g, 0, 0, 0.26 * k, 0.24 * k, fog); g.restore();
@@ -73,6 +74,7 @@ class Humpback extends Crosser {
   constructor(info) { super(info, Math.min(U * 120, W * 1.2), 6, 0.93, rand(0.36, 0.46)); this.kick = rand(TAU); this.sang = false; }
   update(dt) { this.kick += dt * TAU * 0.22; if (!this.sang && this.t > 2) { this.sang = true; AUDIO.whale(); } return this.step(dt, 0.015, 0.12); }
   draw(g) {
+    if (this.glTile) return fglBlit(g, this);
     const L = 600, k = this.k, fog = depthFog(this.z), osc = Math.sin(this.kick);
     const body = vspr('hbBody', 1.06, 0.3, L, paintHumpbackBody), fin = vspr('hbFin', 0.36, 0.12, L, paintHumpbackFin, 1, 0.3), fl = vspr('hbFluke', 0.2, 0.08, L, paintHumpbackFluke, 1, 0.5);
     g.save(); g.translate(this.x, this.y); g.scale(this.dir, 1); g.rotate(this.pitch * this.dir + osc * 0.02);
@@ -94,12 +96,23 @@ class Diver extends Crosser {
     LIFE.danger.push({ x: this.x, y: this.y, r: U * 24 });
     return this.step(dt, 0.02, 0.18);
   }
+  // two-segment limb from (x0, y0): [knee x, y, end x, y, end angle]
+  limbPts(x0, y0, a1, l1, a2, l2) {
+    const x1 = x0 + Math.cos(a1) * l1, y1 = y0 + Math.sin(a1) * l1;
+    return [x1, y1, x1 + Math.cos(a1 + a2) * l2, y1 + Math.sin(a1 + a2) * l2, a1 + a2];
+  }
   limb(g, x0, y0, a1, l1, a2, l2, w, col) {
-    const x1 = x0 + Math.cos(a1) * l1, y1 = y0 + Math.sin(a1) * l1, x2 = x1 + Math.cos(a1 + a2) * l2, y2 = y1 + Math.sin(a1 + a2) * l2;
+    const [x1, y1, x2, y2] = this.limbPts(x0, y0, a1, l1, a2, l2);
     g.strokeStyle = col; g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = w; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.lineTo(x2, y2); g.stroke();
     return [x2, y2, a1 + a2];
   }
   draw(g) {
+    if (this.glTile) {
+      fglBlit(g, this);
+      g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir * 0.6); g.scale(this.dir * this.k, this.k);
+      this.gear(g, depthFog(this.z), true); this.face(g); g.restore();
+      return;
+    }
     const k = this.k, fog = depthFog(this.z), suit = rgbStr(mixRGB([26, 32, 44], FOG_RGB, fog)), suit2 = rgbStr(mixRGB([14, 18, 26], FOG_RGB, fog));
     const finC = rgbStr(mixRGB(hexRGB(this.fin), FOG_RGB, fog));
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * this.dir * 0.6); g.scale(this.dir * k, k);
@@ -117,19 +130,26 @@ class Diver extends Crosser {
     g.fillStyle = '#555'; g.fillRect(0.16, -0.1, 0.035, 0.03);
     // torso with BCD
     g.fillStyle = suit; g.beginPath(); g.ellipse(0.02, 0.0, 0.19, 0.058, 0, 0, TAU); g.fill();
-    g.fillStyle = rgbStr(mixRGB([43, 179, 168], FOG_RGB, fog)); g.fillRect(-0.14, 0.015, 0.28, 0.012);
-    g.fillStyle = rgbStr(mixRGB([40, 44, 54], FOG_RGB, fog)); g.fillRect(-0.02, -0.05, 0.14, 0.09);
+    this.gear(g, fog, false);
     // head, hood, mask, regulator
     g.fillStyle = suit2; g.beginPath(); g.arc(0.25, -0.01, 0.048, 0, TAU); g.fill();
-    const mg = g.createLinearGradient(0.26, -0.04, 0.3, 0.0); mg.addColorStop(0, 'rgba(210,240,255,0.95)'); mg.addColorStop(1, 'rgba(60,120,160,0.9)');
-    g.fillStyle = '#111'; g.fillRect(0.265, -0.042, 0.035, 0.036); g.fillStyle = mg; g.fillRect(0.272, -0.036, 0.024, 0.024);
-    g.fillStyle = '#222'; g.beginPath(); g.arc(0.29, 0.02, 0.016, 0, TAU); g.fill();
-    g.strokeStyle = '#1a1a1a'; g.lineWidth = 0.01; g.beginPath(); g.moveTo(0.18, -0.08); g.quadraticCurveTo(0.26, -0.1, 0.29, 0.02); g.stroke();
+    this.face(g);
     leg(s1, suit);
     const [hx, hy] = this.limb(g, 0.15, 0.035, 0.75 + s2 * 0.05, 0.12, -0.55, 0.12, 0.05, suit);
     g.fillStyle = '#333'; g.save(); g.translate(hx, hy); g.rotate(-0.2); g.fillRect(-0.01, -0.012, 0.07, 0.024); g.fillStyle = '#ffe9a0'; g.fillRect(0.058, -0.01, 0.01, 0.02); g.restore();
     this.hand = [hx, hy];
     g.restore();
+  }
+  // harness strap and backpack; in 3D only the strap is drawn over the modelled torso
+  gear(g, fog, strapOnly) {
+    g.fillStyle = rgbStr(mixRGB([43, 179, 168], FOG_RGB, fog)); g.fillRect(-0.14, 0.015, 0.28, 0.012);
+    if (!strapOnly) { g.fillStyle = rgbStr(mixRGB([40, 44, 54], FOG_RGB, fog)); g.fillRect(-0.02, -0.05, 0.14, 0.09); }
+  }
+  face(g) {
+    const mg = g.createLinearGradient(0.26, -0.04, 0.3, 0.0); mg.addColorStop(0, 'rgba(210,240,255,0.95)'); mg.addColorStop(1, 'rgba(60,120,160,0.9)');
+    g.fillStyle = '#111'; g.fillRect(0.265, -0.042, 0.035, 0.036); g.fillStyle = mg; g.fillRect(0.272, -0.036, 0.024, 0.024);
+    g.fillStyle = '#222'; g.beginPath(); g.arc(0.29, 0.02, 0.016, 0, TAU); g.fill();
+    g.strokeStyle = '#1a1a1a'; g.lineWidth = 0.01; g.beginPath(); g.moveTo(0.18, -0.08); g.quadraticCurveTo(0.26, -0.1, 0.29, 0.02); g.stroke();
   }
   glow(g) {
     if (!this.hand) return;
@@ -177,39 +197,54 @@ class Octopus {
   }
   newLeg() { this.state = 'crawl'; this.st = 0; this.legs++; const s = Math.random() < 0.5 ? -1 : 1; this.tx = clamp(this.x + s * rand(0.07, 0.16) * W, W * 0.05, W * 0.95); if (Math.abs(this.tx - this.x) < W * 0.05) this.tx = clamp(this.x - s * W * 0.1, W * 0.05, W * 0.95); this.dir = sgn(this.tx - this.x); }
   palette() { const c = this.col; const a = c < 1 ? mixRGB([150, 62, 44], [228, 206, 188], c) : mixRGB([228, 206, 188], [190, 40, 40], c - 1); return a; }
+  // arm centre lines (px, relative to the body); each arm's half-width runs m·0.21 → 12% of that at the tip
+  armLines(t, m, jet) {
+    return this.arms.map((A, i) => {
+      const reach = (jet ? 0.9 : 0.55 + 0.35 * this.out) * A.len * (0.35 + 0.65 * this.out);
+      const baseA = jet ? Math.PI / 2 + (i - 3.5) * 0.08 : A.a + Math.sin(t * 0.9 + A.ph) * 0.25;
+      const n = 12, pts = []; let x = Math.cos(A.a) * m * 0.35, y = m * 0.25, a = baseA;
+      for (let s = 0; s <= n; s++) { pts.push([x, y]); const u = s / n; a += (Math.sin(t * 1.4 + A.ph + u * 4) * 0.18 + (jet ? 0 : (i < 4 ? -0.05 : 0.05)) + (u > 0.7 ? (i < 4 ? -0.35 : 0.35) * (u - 0.7) * 3 : 0)); x += Math.cos(a) * reach / n; y += Math.sin(a) * reach / n; }
+      return pts;
+    });
+  }
+  eyes(g, m, C) {
+    for (const s of [-1, 1]) {
+      const ex = s * m * 0.28, ey = m * 0.05;
+      g.fillStyle = C; g.beginPath(); g.arc(ex, ey, m * 0.16, 0, TAU); g.fill();
+      g.fillStyle = '#f2e6c0'; g.beginPath(); g.arc(ex, ey - m * 0.02, m * 0.1, 0, TAU); g.fill();
+      g.fillStyle = '#111'; g.fillRect(ex - m * 0.07, ey - m * 0.035, m * 0.14, m * 0.03);
+    }
+  }
   draw(g, t) {
     if (!this.gone && this.out > 0.01) {
       const m = this.m * (0.35 + 0.65 * this.out), col = this.palette(), dark = mixRGB(col, [40, 10, 10], 0.45), fog = depthFog(this.z);
       const C = rgbStr(mixRGB(col, FOG_RGB, fog)), D = rgbStr(mixRGB(dark, FOG_RGB, fog));
       const jet = this.state === 'jet';
-      g.save(); g.translate(this.x, this.y);
-      // arms
-      for (let i = 0; i < 8; i++) {
-        const A = this.arms[i], reach = (jet ? 0.9 : 0.55 + 0.35 * this.out) * A.len * (0.35 + 0.65 * this.out);
-        const baseA = jet ? Math.PI / 2 + (i - 3.5) * 0.08 : A.a + Math.sin(t * 0.9 + A.ph) * 0.25;
-        const bx = Math.cos(A.a) * m * 0.35, by = m * 0.25;
-        const n = 12, pts = []; let x = bx, y = by, a = baseA;
-        for (let s = 0; s <= n; s++) { pts.push([x, y]); const u = s / n; a += (Math.sin(t * 1.4 + A.ph + u * 4) * 0.18 + (jet ? 0 : (i < 4 ? -0.05 : 0.05)) + (u > 0.7 ? (i < 4 ? -0.35 : 0.35) * (u - 0.7) * 3 : 0)); x += Math.cos(a) * reach / n; y += Math.sin(a) * reach / n; }
-        g.beginPath();
-        for (let s = 0; s <= n; s++) { const w = m * 0.21 * (1 - s / n * 0.88); const p = pts[s], q = pts[Math.min(s + 1, n)]; const aa = Math.atan2(q[1] - p[1], q[0] - p[0] + 1e-6); s ? g.lineTo(p[0] - Math.sin(aa) * w, p[1] + Math.cos(aa) * w) : g.moveTo(p[0] - Math.sin(aa) * w, p[1] + Math.cos(aa) * w); }
-        for (let s = n; s >= 0; s--) { const w = m * 0.21 * (1 - s / n * 0.88); const p = pts[s], q = pts[Math.min(s + 1, n)]; const aa = Math.atan2(q[1] - p[1], q[0] - p[0] + 1e-6); g.lineTo(p[0] + Math.sin(aa) * w, p[1] - Math.cos(aa) * w); }
-        g.closePath(); g.fillStyle = i % 2 ? D : C; g.fill();
-        if (i % 2 === 0) { g.fillStyle = 'rgba(255,235,225,0.55)'; for (let s = 2; s < n; s += 1) { const p = pts[s]; g.beginPath(); g.arc(p[0], p[1] + m * 0.05, m * 0.035 * (1 - s / n), 0, TAU); g.fill(); } }
+      if (this.glTile) {
+        fglBlit(g, this);
+        g.save(); g.translate(this.x, this.y); this.eyes(g, m, C); g.restore();
+      } else {
+        g.save(); g.translate(this.x, this.y);
+        // arms
+        const lines = this.armLines(t, m, jet), n = 12;
+        for (let i = 0; i < 8; i++) {
+          const pts = lines[i];
+          g.beginPath();
+          for (let s = 0; s <= n; s++) { const w = m * 0.21 * (1 - s / n * 0.88); const p = pts[s], q = pts[Math.min(s + 1, n)]; const aa = Math.atan2(q[1] - p[1], q[0] - p[0] + 1e-6); s ? g.lineTo(p[0] - Math.sin(aa) * w, p[1] + Math.cos(aa) * w) : g.moveTo(p[0] - Math.sin(aa) * w, p[1] + Math.cos(aa) * w); }
+          for (let s = n; s >= 0; s--) { const w = m * 0.21 * (1 - s / n * 0.88); const p = pts[s], q = pts[Math.min(s + 1, n)]; const aa = Math.atan2(q[1] - p[1], q[0] - p[0] + 1e-6); g.lineTo(p[0] + Math.sin(aa) * w, p[1] - Math.cos(aa) * w); }
+          g.closePath(); g.fillStyle = i % 2 ? D : C; g.fill();
+          if (i % 2 === 0) { g.fillStyle = 'rgba(255,235,225,0.55)'; for (let s = 2; s < n; s += 1) { const p = pts[s]; g.beginPath(); g.arc(p[0], p[1] + m * 0.05, m * 0.035 * (1 - s / n), 0, TAU); g.fill(); } }
+        }
+        // mantle and head
+        g.rotate(jet ? 0 : -0.5 * this.dir);
+        const gr = g.createRadialGradient(-m * 0.15, -m * 0.5, m * 0.1, 0, -m * 0.3, m * 0.9); gr.addColorStop(0, rgbStr(mixRGB(col, [255, 240, 230], 0.3))); gr.addColorStop(1, D);
+        g.fillStyle = gr; g.beginPath(); g.ellipse(0, -m * 0.45, m * 0.45, m * 0.62, 0, 0, TAU); g.fill();
+        g.fillStyle = 'rgba(255,240,230,0.35)'; for (let i = 0; i < 18; i++) { g.beginPath(); g.arc(Math.sin(i * 2.3) * m * 0.35, -m * 0.45 + Math.cos(i * 1.7) * m * 0.5, m * 0.035, 0, TAU); g.fill(); }
+        g.fillStyle = 'rgba(40,10,10,0.3)'; for (let i = 0; i < 10; i++) { g.beginPath(); g.arc(Math.cos(i * 2.9) * m * 0.3, -m * 0.5 + Math.sin(i * 1.3) * m * 0.4, m * 0.06, 0, TAU); g.fill(); }
+        g.rotate(jet ? 0 : 0.5 * this.dir);
+        this.eyes(g, m, C);
+        g.restore();
       }
-      // mantle and head
-      g.rotate(jet ? 0 : -0.5 * this.dir);
-      const gr = g.createRadialGradient(-m * 0.15, -m * 0.5, m * 0.1, 0, -m * 0.3, m * 0.9); gr.addColorStop(0, rgbStr(mixRGB(col, [255, 240, 230], 0.3))); gr.addColorStop(1, D);
-      g.fillStyle = gr; g.beginPath(); g.ellipse(0, -m * 0.45, m * 0.45, m * 0.62, 0, 0, TAU); g.fill();
-      g.fillStyle = 'rgba(255,240,230,0.35)'; for (let i = 0; i < 18; i++) { g.beginPath(); g.arc(Math.sin(i * 2.3) * m * 0.35, -m * 0.45 + Math.cos(i * 1.7) * m * 0.5, m * 0.035, 0, TAU); g.fill(); }
-      g.fillStyle = 'rgba(40,10,10,0.3)'; for (let i = 0; i < 10; i++) { g.beginPath(); g.arc(Math.cos(i * 2.9) * m * 0.3, -m * 0.5 + Math.sin(i * 1.3) * m * 0.4, m * 0.06, 0, TAU); g.fill(); }
-      g.rotate(jet ? 0 : 0.5 * this.dir);
-      for (const s of [-1, 1]) {
-        const ex = s * m * 0.28, ey = m * 0.05;
-        g.fillStyle = C; g.beginPath(); g.arc(ex, ey, m * 0.16, 0, TAU); g.fill();
-        g.fillStyle = '#f2e6c0'; g.beginPath(); g.arc(ex, ey - m * 0.02, m * 0.1, 0, TAU); g.fill();
-        g.fillStyle = '#111'; g.fillRect(ex - m * 0.07, ey - m * 0.035, m * 0.14, m * 0.03);
-      }
-      g.restore();
     }
     for (const p of this.ink) { const a = Math.max(0, 0.55 * (1 - p.life / 7)); g.globalAlpha = a; g.drawImage(GLOW.ink, p.x - p.r, p.y - p.r, p.r * 2, p.r * 2); }
     g.globalAlpha = 1;
@@ -242,6 +277,7 @@ class Mola extends Crosser {
   constructor(info) { super(info, Math.min(U * 22, W * 0.4), 2.6, rand(0.3, 0.45), rand(0.26, 0.48)); this.fl = rand(TAU); }
   update(dt) { this.fl += dt * TAU * 0.45; return this.step(dt, 0.03, 0.2); }
   draw(g) {
+    if (this.glTile) return fglBlit(g, this);
     const L = 360, k = this.k, fog = depthFog(this.z), o = Math.sin(this.fl);
     const body = vspr('mBody', 1.04, 0.92, L, paintMolaBody), df = vspr('mD', 0.26, 0.6, L, paintMolaFin(true), 0.5, 1), af = vspr('mA', 0.26, 0.6, L, paintMolaFin(false), 0.5, 0);
     g.save(); g.translate(this.x, this.y); g.scale(this.dir, 1); g.rotate(0.12 * Math.sin(this.t * 0.3) + this.pitch * this.dir);
@@ -253,6 +289,14 @@ class Mola extends Crosser {
 }
 
 /* ---------------- Flashlight fish (night only) ---------------- */
+// one fish in body lengths, light organ shut (the 3D model; the lit organ is drawn over it)
+function paintFlashlightFish(g) {
+  const body = new Path2D(); body.ellipse(0, 0, 0.5, 0.22, 0, 0, TAU);
+  g.fillStyle = '#0e1626'; g.beginPath(); g.moveTo(-0.45, 0); g.lineTo(-0.75, -0.2); g.lineTo(-0.68, 0); g.lineTo(-0.75, 0.2); g.fill();
+  g.fill(body); shade(g, body, -0.22, 0.22, { top: 0.2, sheen: 0.3 });
+  g.fillStyle = '#1a2638'; g.beginPath(); g.ellipse(0.28, 0.05, 0.09, 0.05, 0, 0, TAU); g.fill();
+  g.fillStyle = '#2a3a50'; g.beginPath(); g.arc(0.3, -0.05, 0.05, 0, TAU); g.fill();
+}
 class Flashlights {
   constructor(info) {
     this.info = info; this.kind = 'visitor'; this.z = 0.3; this.dir = Math.random() < 0.5 ? 1 : -1; this.t = 0; this.leaving = false;
@@ -274,6 +318,11 @@ class Flashlights {
   draw(g) {
     const k = U * 2.6;
     for (const f of this.fish) {
+      if (f.glTile) {
+        fglBlit(g, f);
+        if (f.off <= 0) { g.save(); g.translate(f.x, f.y); g.scale(f.d * f.s, f.s); g.fillStyle = '#dffcff'; g.beginPath(); g.ellipse(k * 0.28, k * 0.05, k * 0.09, k * 0.05, 0, 0, TAU); g.fill(); g.restore(); }
+        continue;
+      }
       g.save(); g.translate(f.x, f.y); g.scale(f.d * f.s, f.s);
       g.fillStyle = '#0e1626'; g.beginPath(); g.ellipse(0, 0, k * 0.5, k * 0.22, 0, 0, TAU); g.fill();
       g.beginPath(); g.moveTo(-k * 0.45, 0); g.lineTo(-k * 0.75, -k * 0.2); g.lineTo(-k * 0.68, 0); g.lineTo(-k * 0.75, k * 0.2); g.fill();

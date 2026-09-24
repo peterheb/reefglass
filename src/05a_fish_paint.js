@@ -6,9 +6,12 @@
 const SPECIES = {};
 function defSpecies(id, d) { d.id = id; SPECIES[id] = d; return d; }
 
+// set while painting 3D fish textures: shade() records the body outline instead of baking in light,
+// and rim() leaves out the cartoon outer outline
+let FLAT_PAINT = null;
 function rim(g, path, inner, innerW, outer, outerW) {
   g.lineJoin = 'round';
-  if (outer) { g.strokeStyle = outer; g.lineWidth = outerW; g.stroke(path); }
+  if (outer && !FLAT_PAINT) { g.strokeStyle = outer; g.lineWidth = outerW; g.stroke(path); }
   if (inner) { g.save(); g.clip(path); g.strokeStyle = inner; g.lineWidth = innerW; g.stroke(path); g.restore(); }
 }
 function fillP(g, path, col, a = 1) { g.globalAlpha = a; g.fillStyle = col; g.fill(path); g.globalAlpha = 1; }
@@ -20,6 +23,7 @@ function rays(g, path, A, B, C, D, n, col, lw) {
 function vgrad(g, y0, y1, stops) { const gr = g.createLinearGradient(0, y0, 0, y1); stops.forEach(([o, c]) => gr.addColorStop(o, c)); return gr; }
 function hgrad(g, x0, x1, stops) { const gr = g.createLinearGradient(x0, 0, x1, 0); stops.forEach(([o, c]) => gr.addColorStop(o, c)); return gr; }
 function shade(g, path, y0, y1, o = {}) {
+  if (FLAT_PAINT) { FLAT_PAINT.body = FLAT_PAINT.body || path; return; }
   g.save(); g.clip(path);
   g.fillStyle = vgrad(g, y0, y1, [[0, `rgba(8,18,48,${o.top ?? 0.34})`], [0.42, 'rgba(8,18,48,0)'], [0.68, 'rgba(255,255,240,0)'], [1, `rgba(255,252,236,${o.belly ?? 0.22})`]]);
   g.fillRect(-1, y0, 2, y1 - y0);
@@ -41,6 +45,7 @@ function scales(g, path, s, y0, y1, dark = 'rgba(0,10,30,0.13)', light = 'rgba(2
   g.restore();
 }
 function eye(g, x, y, r, iris = '#d9a441', ring = null) {
+  if (FLAT_PAINT) (FLAT_PAINT.eyes = FLAT_PAINT.eyes || []).push([x, y, r]);
   g.fillStyle = 'rgba(0,0,0,0.3)'; g.beginPath(); g.arc(x, y, r * 1.25, 0, TAU); g.fill();
   if (ring) { g.fillStyle = ring; g.beginPath(); g.arc(x, y, r * 1.1, 0, TAU); g.fill(); }
   const gr = g.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
@@ -87,7 +92,7 @@ function simplePec(len, h, col, a = 0.6, edge = null) {
 defSpecies('clown', {
   name: 'Ocellaris clownfish', sci: 'Amphiprion ocellaris', fact: 'A slime coat protects it from its anemone’s stings. All are born male; the dominant fish becomes female.',
   len: 5.4, res: 220, box: [1.04, 0.84], tailBox: [0.3, 0.46], tailAt: [-0.47, 0], pecBox: [0.18, 0.14], pecAt: [0.16, 0.05], pecAng: 0.35,
-  swim: { speed: 2.4, burst: 7, agility: 3.2, tailHz: 3.4, tailAmp: 0.55 }, behavior: 'home', zone: [0.55, 1], z: [0.2, 0.28], count: 3,
+  swim: { speed: 2.4, burst: 7, agility: 3.2, tailHz: 3.4, tailAmp: 0.55 }, behavior: 'home', zone: [0.55, 1], z: [0.2, 0.28], count: 3, gl: { thick: 0.55, scale: 0.03, rough: 0.38, sss: 1 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.01); body.bezierCurveTo(0.46, -0.14, 0.3, -0.215, 0.1, -0.215); body.bezierCurveTo(-0.15, -0.22, -0.36, -0.14, -0.5, -0.07); body.lineTo(-0.5, 0.07); body.bezierCurveTo(-0.36, 0.14, -0.15, 0.205, 0.1, 0.2); body.bezierCurveTo(0.3, 0.2, 0.46, 0.13, 0.5, 0.03); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.2, -0.19); dors.bezierCurveTo(0.14, -0.31, 0.04, -0.31, -0.02, -0.27); dors.bezierCurveTo(-0.1, -0.38, -0.28, -0.39, -0.41, -0.1); dors.lineTo(0.2, -0.12); dors.closePath();
@@ -112,7 +117,7 @@ defSpecies('clown', {
 defSpecies('bluetang', {
   name: 'Blue tang', sci: 'Paracanthurus hepatus', fact: 'A surgeonfish: a scalpel-sharp spine hides at the base of its tail.',
   len: 9.2, res: 300, box: [1.04, 0.84], tailBox: [0.26, 0.5], tailAt: [-0.47, 0], pecBox: [0.2, 0.14], pecAt: [0.18, 0.06], pecAng: 0.3,
-  swim: { speed: 4.2, burst: 10, agility: 2.2, tailHz: 2.4, tailAmp: 0.5 }, behavior: 'cruise', zone: [0.1, 0.85], z: [0.05, 0.75], count: 3,
+  swim: { speed: 4.2, burst: 10, agility: 2.2, tailHz: 2.4, tailAmp: 0.5 }, behavior: 'cruise', zone: [0.1, 0.85], z: [0.05, 0.75], count: 3, gl: { thick: 0.34, scale: 0.014, rough: 0.3, iri: 0.25, sss: 0.5 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.04); body.bezierCurveTo(0.47, -0.12, 0.34, -0.27, 0.1, -0.29); body.bezierCurveTo(-0.15, -0.3, -0.38, -0.16, -0.5, -0.06); body.lineTo(-0.5, 0.06); body.bezierCurveTo(-0.38, 0.16, -0.15, 0.3, 0.1, 0.29); body.bezierCurveTo(0.34, 0.27, 0.46, 0.16, 0.5, 0.06); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.28, -0.24); dors.bezierCurveTo(0.15, -0.38, -0.2, -0.39, -0.45, -0.13); dors.lineTo(0, -0.2); dors.closePath();
@@ -143,7 +148,7 @@ defSpecies('bluetang', {
 defSpecies('yellowtang', {
   name: 'Yellow tang', sci: 'Zebrasoma flavescens', fact: 'Grazes algae all day. At night its yellow dulls and a pale patch appears on its side.',
   len: 7.4, res: 280, box: [1.04, 1.18], tailBox: [0.24, 0.44], tailAt: [-0.47, 0], pecBox: [0.18, 0.14], pecAt: [0.16, 0.04], pecAng: 0.35,
-  swim: { speed: 3.4, burst: 8, agility: 2.4, tailHz: 2.2, tailAmp: 0.45 }, behavior: 'picker', zone: [0.15, 0.95], z: [0.08, 0.7], count: 3,
+  swim: { speed: 3.4, burst: 8, agility: 2.4, tailHz: 2.2, tailAmp: 0.45 }, behavior: 'picker', zone: [0.15, 0.95], z: [0.08, 0.7], count: 3, gl: { thick: 0.3, scale: 0.012, rough: 0.35, sss: 0.6 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.03); body.bezierCurveTo(0.44, -0.08, 0.36, -0.2, 0.2, -0.3); body.bezierCurveTo(0.0, -0.37, -0.3, -0.25, -0.5, -0.07); body.lineTo(-0.5, 0.07); body.bezierCurveTo(-0.3, 0.25, 0.0, 0.36, 0.2, 0.3); body.bezierCurveTo(0.36, 0.22, 0.44, 0.11, 0.5, 0.05); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.25, -0.28); dors.bezierCurveTo(0.15, -0.5, -0.06, -0.58, -0.26, -0.46); dors.bezierCurveTo(-0.37, -0.37, -0.44, -0.22, -0.47, -0.09); dors.lineTo(0, -0.2); dors.closePath();
@@ -165,7 +170,7 @@ defSpecies('yellowtang', {
 defSpecies('idol', {
   name: 'Moorish idol', sci: 'Zanclus cornutus', fact: 'The only living member of its family, Zanclidae. Its trailing dorsal streamer can outgrow its body.',
   len: 8.4, res: 300, box: [1.04, 1.5], tailBox: [0.24, 0.4], tailAt: [-0.47, 0], pecBox: [0.16, 0.12], pecAt: [0.12, 0.08], pecAng: 0.4,
-  swim: { speed: 3.2, burst: 8, agility: 2, tailHz: 2, tailAmp: 0.45 }, behavior: 'picker', zone: [0.2, 0.9], z: [0.1, 0.65], count: 2,
+  swim: { speed: 3.2, burst: 8, agility: 2, tailHz: 2, tailAmp: 0.45 }, behavior: 'picker', zone: [0.2, 0.9], z: [0.1, 0.65], count: 2, gl: { thick: 0.3, scale: 0.015, rough: 0.3, iri: 0.1 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.05); body.bezierCurveTo(0.45, 0.01, 0.38, -0.03, 0.3, -0.12); body.bezierCurveTo(0.24, -0.34, 0.05, -0.45, -0.1, -0.4); body.bezierCurveTo(-0.3, -0.3, -0.42, -0.14, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.42, 0.14, -0.3, 0.3, -0.1, 0.38); body.bezierCurveTo(0.08, 0.42, 0.24, 0.3, 0.3, 0.14); body.bezierCurveTo(0.36, 0.09, 0.44, 0.08, 0.5, 0.07); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.04, -0.42); dors.bezierCurveTo(0.0, -0.58, -0.05, -0.68, -0.09, -0.72); dors.bezierCurveTo(-0.17, -0.56, -0.34, -0.3, -0.46, -0.1); dors.lineTo(-0.1, -0.3); dors.closePath();
@@ -205,7 +210,7 @@ defSpecies('idol', {
 defSpecies('emperor', {
   name: 'Emperor angelfish', sci: 'Pomacanthus imperator', fact: 'Juveniles wear white rings on navy blue, then transform into these yellow-striped adults.',
   len: 10.5, res: 320, box: [1.04, 0.98], tailBox: [0.24, 0.46], tailAt: [-0.47, 0], pecBox: [0.2, 0.14], pecAt: [0.13, 0.06], pecAng: 0.3,
-  swim: { speed: 3.3, burst: 8, agility: 1.8, tailHz: 1.9, tailAmp: 0.45 }, behavior: 'picker', zone: [0.25, 0.95], z: [0.05, 0.6], count: 1,
+  swim: { speed: 3.3, burst: 8, agility: 1.8, tailHz: 1.9, tailAmp: 0.45 }, behavior: 'picker', zone: [0.25, 0.95], z: [0.05, 0.6], count: 1, gl: { thick: 0.35, scale: 0.02, rough: 0.3, iri: 0.15 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.05); body.bezierCurveTo(0.47, -0.1, 0.36, -0.26, 0.15, -0.3); body.bezierCurveTo(-0.1, -0.34, -0.36, -0.2, -0.5, -0.07); body.lineTo(-0.5, 0.07); body.bezierCurveTo(-0.36, 0.2, -0.1, 0.34, 0.15, 0.3); body.bezierCurveTo(0.36, 0.26, 0.47, 0.14, 0.5, 0.06); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.12, -0.3); dors.bezierCurveTo(-0.05, -0.43, -0.3, -0.44, -0.44, -0.3); dors.bezierCurveTo(-0.5, -0.22, -0.49, -0.12, -0.47, -0.08); dors.lineTo(0, -0.2); dors.closePath();
@@ -237,7 +242,7 @@ defSpecies('emperor', {
 defSpecies('copperband', {
   name: 'Copperband butterflyfish', sci: 'Chelmon rostratus', fact: 'Its tweezer snout plucks worms from crevices; the false eyespot near its tail confuses predators.',
   len: 7.2, res: 280, box: [1.04, 1.02], tailBox: [0.22, 0.38], tailAt: [-0.47, 0], pecBox: [0.16, 0.12], pecAt: [0.12, 0.06], pecAng: 0.35,
-  swim: { speed: 2.8, burst: 7, agility: 2.2, tailHz: 2.4, tailAmp: 0.45 }, behavior: 'picker', zone: [0.3, 0.97], z: [0.08, 0.55], count: 2,
+  swim: { speed: 2.8, burst: 7, agility: 2.2, tailHz: 2.4, tailAmp: 0.45 }, behavior: 'picker', zone: [0.3, 0.97], z: [0.08, 0.55], count: 2, gl: { thick: 0.3, scale: 0.02, rough: 0.32, iri: 0.15 },
   paintBody(g) {
     const body = new Path2D(); body.moveTo(0.5, 0.0); body.lineTo(0.3, -0.045); body.bezierCurveTo(0.24, -0.25, 0.05, -0.36, -0.12, -0.34); body.bezierCurveTo(-0.3, -0.3, -0.44, -0.15, -0.5, -0.05); body.lineTo(-0.5, 0.05); body.bezierCurveTo(-0.44, 0.15, -0.3, 0.3, -0.12, 0.33); body.bezierCurveTo(0.05, 0.35, 0.24, 0.22, 0.3, 0.035); body.lineTo(0.5, 0.018); body.closePath();
     const dors = new Path2D(); dors.moveTo(0.1, -0.33); dors.bezierCurveTo(-0.08, -0.46, -0.3, -0.5, -0.42, -0.32); dors.bezierCurveTo(-0.47, -0.22, -0.48, -0.12, -0.48, -0.06); dors.lineTo(-0.1, -0.2); dors.closePath();

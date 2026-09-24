@@ -124,16 +124,17 @@ function buildRays() {
   for (let i = 0; i < Math.round(W / 55); i++) ENV.glints.push({ x: rand(W), y: rand(0.004, 0.05) * H, s: rand(0.6, 1.6), v: rand(-14, 14), ph: rand(TAU), f: rand(0.4, 1.3) });
 }
 
-function drawRays(g, t) {
-  const day = TOD.day, amt = REDUCED ? 0.6 : 1;
-  const sunY = -H * 1.3;
+// where each shaft is this frame; shared by the 2D rays and the 3D models swimming through them
+function updateRays(t) {
+  const day = TOD.day, amt = REDUCED ? 0.6 : 1, sunY = -H * 1.3;
+  ENV.rayNow = ENV.rays.map((r) => {
+    const x = r.x + Math.sin(t * r.f * 0.7 + r.ph) * r.sway, pulse = 0.55 + 0.45 * Math.sin(t * r.f * TAU * 0.35 + r.ph);
+    return { r, x, ang: Math.atan2(x - ENV.sunX, -sunY) * 0.9, aDay: r.a * pulse * 0.42 * day * amt, aNight: r.a * 0.55 * TOD.night * amt * TOD.moon };
+  });
+}
+function drawRays(g) {
   g.globalCompositeOperation = 'lighter';
-  for (const r of ENV.rays) {
-    const x = r.x + Math.sin(t * r.f * 0.7 + r.ph) * r.sway;
-    const ang = Math.atan2(x - ENV.sunX, -sunY) * 0.9;
-    const pulse = 0.55 + 0.45 * Math.sin(t * r.f * TAU * 0.35 + r.ph);
-    const aDay = r.a * pulse * 0.42 * day * amt;
-    const aNight = r.a * 0.55 * TOD.night * amt * TOD.moon;
+  for (const { r, x, ang, aDay, aNight } of ENV.rayNow) {
     g.save(); g.translate(x, -H * 0.01); g.rotate(-ang);
     if (aDay > 0.005) { g.globalAlpha = aDay; g.drawImage(ENV.rayWarm, -r.w / 2, 0, r.w, r.len); }
     if (aNight > 0.005) { g.globalAlpha = aNight; g.drawImage(ENV.rayCool, -r.w / 2, 0, r.w * 0.8, r.len * 0.8); }
