@@ -24,7 +24,7 @@
    sun. Only the relief is applied, so the painted light survives.
    Toggle everything with G.
    ===================================================================== */
-const FGL = { on: false, want: true, gl: null, canvas: null, fish: null, blur: null, relit: null, quad: null, hdr: false, dyn: null, white: null, cache: {}, tiled: [] };
+const FGL = { on: false, want: true, chosen: false, soft: false, gl: null, canvas: null, fish: null, blur: null, relit: null, quad: null, hdr: false, dyn: null, white: null, cache: {}, tiled: [] };
 
 const GLSL_NOISE = `
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -327,6 +327,11 @@ function fglInit() {
   const w = mk(1, 1), wg = w.getContext('2d'); wg.fillStyle = '#fff'; wg.fillRect(0, 0, 1, 1);
   FGL.white = { t: fglTexture(w), texel: [1, 1] };
   c.addEventListener('webglcontextlost', (e) => { e.preventDefault(); FGL.on = false; FGL.gl = null; });
+  // A software rasterizer (no GPU, or a blocklisted one) runs the 3D pass at well under 1 fps, so start
+  // with the sprites there. G still turns 3D on for anyone who wants to try.
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  FGL.soft = /swiftshader|llvmpipe|softpipe|lavapipe|software|basic render/i.test(gl.getParameter(dbg ? dbg.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+  if (FGL.soft) FGL.want = false;
   FGL.on = FGL.want;
   for (const sp of Object.values(SPECIES)) if (sp.gl) fglBuildSpecies(sp);
 }
@@ -722,4 +727,4 @@ function fglRelight(back, front) {
 
 function reefLayer(k) { return FGL.on && REEF.lit ? REEF.lit[k] : REEF[k]; }
 
-function fglToggle(on = !FGL.want) { FGL.want = on; FGL.on = on && !!FGL.gl; return FGL.on; }
+function fglToggle(on = !FGL.want, chosen = true) { FGL.want = on; FGL.chosen ||= chosen; FGL.on = on && !!FGL.gl; return FGL.on; }

@@ -181,6 +181,10 @@ const PERF = { ema: 16, slowFor: 0, fastFor: 0 };
 function governPerf(dtMs) {
   PERF.ema = lerp(PERF.ema, dtMs, 0.05);
   if (PERF.ema > 26) { PERF.slowFor += dtMs; PERF.fastFor = 0; } else { PERF.slowFor = 0; }
+  // Crawling (under ~17 fps) with 3D on: the 3D pass is the big cost, so drop to sprites before shrinking
+  // the canvas. Only when 3D wasn't picked by hand with G.
+  PERF.crawl = FGL.on && PERF.ema > 60 ? (PERF.crawl || 0) + 1 : 0;
+  if (PERF.crawl > 20 && !FGL.chosen) { fglToggle(false, false); PERF.crawl = PERF.slowFor = 0; PERF.ema = 30; return; }
   if (PERF.slowFor > 2500 && (PERF.steps || 0) < 3) {
     PERF.slowFor = 0; PERF.steps = (PERF.steps || 0) + 1;
     maxPixels = Math.max(0.8e6, Math.min(maxPixels, W * H * PX * PX) * 0.66); requestRebuild(true);

@@ -315,6 +315,10 @@ const PERF = { ema: 16, slowFor: 0, fastFor: 0 };
 function governPerf(dtMs) {
   PERF.ema = lerp(PERF.ema, dtMs, 0.05);
   if (PERF.ema > 26) { PERF.slowFor += dtMs; PERF.fastFor = 0; } else { PERF.slowFor = 0; }
+  // Crawling (under ~17 fps) with 3D on: the 3D pass is the big cost, so drop to sprites before shrinking
+  // the canvas. Only when 3D wasn't picked by hand with G.
+  PERF.crawl = FGL.on && PERF.ema > 60 ? (PERF.crawl || 0) + 1 : 0;
+  if (PERF.crawl > 20 && !FGL.chosen) { fglToggle(false, false); PERF.crawl = PERF.slowFor = 0; PERF.ema = 30; return; }
   if (PERF.slowFor > 2500 && (PERF.steps || 0) < 3) {
     PERF.slowFor = 0; PERF.steps = (PERF.steps || 0) + 1;
     maxPixels = Math.max(0.8e6, Math.min(maxPixels, W * H * PX * PX) * 0.66); requestRebuild(true);
@@ -2467,7 +2471,7 @@ function spawnFish() {
    sun. Only the relief is applied, so the painted light survives.
    Toggle everything with G.
    ===================================================================== */
-const FGL = { on: false, want: true, gl: null, canvas: null, fish: null, blur: null, relit: null, quad: null, hdr: false, dyn: null, white: null, cache: {}, tiled: [] };
+const FGL = { on: false, want: true, chosen: false, soft: false, gl: null, canvas: null, fish: null, blur: null, relit: null, quad: null, hdr: false, dyn: null, white: null, cache: {}, tiled: [] };
 
 const GLSL_NOISE = `
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -2770,6 +2774,11 @@ function fglInit() {
   const w = mk(1, 1), wg = w.getContext('2d'); wg.fillStyle = '#fff'; wg.fillRect(0, 0, 1, 1);
   FGL.white = { t: fglTexture(w), texel: [1, 1] };
   c.addEventListener('webglcontextlost', (e) => { e.preventDefault(); FGL.on = false; FGL.gl = null; });
+  // A software rasterizer (no GPU, or a blocklisted one) runs the 3D pass at well under 1 fps, so start
+  // with the sprites there. G still turns 3D on for anyone who wants to try.
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  FGL.soft = /swiftshader|llvmpipe|softpipe|lavapipe|software|basic render/i.test(gl.getParameter(dbg ? dbg.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+  if (FGL.soft) FGL.want = false;
   FGL.on = FGL.want;
   for (const sp of Object.values(SPECIES)) if (sp.gl) fglBuildSpecies(sp);
 }
@@ -3165,7 +3174,7 @@ function fglRelight(back, front) {
 
 function reefLayer(k) { return FGL.on && REEF.lit ? REEF.lit[k] : REEF[k]; }
 
-function fglToggle(on = !FGL.want) { FGL.want = on; FGL.on = on && !!FGL.gl; return FGL.on; }
+function fglToggle(on = !FGL.want, chosen = true) { FGL.want = on; FGL.chosen ||= chosen; FGL.on = on && !!FGL.gl; return FGL.on; }
 
 /* =====================================================================
    Special visitors, part 1: framework, turtle, manta, shark, whale shark
