@@ -35,6 +35,13 @@ function paintSand(g, mg) {
     path(sp * 0.22); g.strokeStyle = `rgba(90,66,40,${0.08 + t * 0.1})`; g.lineWidth = sp * 0.16; g.stroke();
     y += sp * srand(0.8, 1.2);
   }
+  for (let i = 0; i < W / 45; i++) {
+    const x = srand(W), y = srand(sandY(x) + U * 0.6, H), s = U * srand(0.18, 0.5) * lerp(0.6, 1.3, (y - top) / (H - top));
+    const c = spick([[150, 140, 128], [120, 108, 96], [178, 168, 150], [96, 92, 90]]);
+    g.fillStyle = 'rgba(40,30,20,0.25)'; g.beginPath(); g.ellipse(x + s * 0.2, y + s * 0.35, s * 1.1, s * 0.45, 0, 0, TAU); g.fill();
+    const pg = g.createRadialGradient(x - s * 0.3, y - s * 0.3, s * 0.1, x, y, s); pg.addColorStop(0, rgbStr(mixRGB(c, [255, 250, 240], 0.35))); pg.addColorStop(1, rgbStr(mixRGB(c, [30, 26, 22], 0.35)));
+    g.fillStyle = pg; g.beginPath(); g.ellipse(x, y, s, s * 0.62, srand(-0.4, 0.4), 0, TAU); g.fill();
+  }
   const n = (W * (H - top)) / 26;
   for (let i = 0; i < n; i++) {
     const r = SR();
@@ -45,6 +52,29 @@ function paintSand(g, mg) {
   g.restore();
   const m = mg.createLinearGradient(0, top, 0, H); m.addColorStop(0, '#dddddd'); m.addColorStop(1, '#8a8a8a');
   mg.fillStyle = m; mg.fill(p);
+}
+
+/* Soft corals (sea fans, sea whips, soft tree coral) bend with the current, so rather than being baked into the
+   layer each is painted into its own sprite, anchored at its base; drawSoftCorals() sways them every frame.
+   reach: how far the coral can extend from its base, in units of its size s. */
+function softCoral(g, paint, x, y, s, reach) {
+  const R = s * reach, w = R * 2, top = R * 1.2, bot = U * 1.2;
+  const c = mk(w * PX, (top + bot) * PX), sg = c.getContext('2d');
+  sg.setTransform(PX, 0, 0, PX, (w / 2 - x) * PX, (top - y) * PX);
+  paint(sg, x, y, s);
+  const back = REEF.softLayer === 'back';
+  if (back) { sg.setTransform(1, 0, 0, 1, 0, 0); sg.globalCompositeOperation = 'source-atop'; sg.fillStyle = rgbStr(FOG_RGB, 0.44); sg.fillRect(0, 0, c.width, c.height); }
+  REEF.soft.push({ spr: c, x, y, w, top, bot, layer: REEF.softLayer, ph: rand(TAU), f: rand(0.35, 0.6), amp: rand(0.05, 0.09) / Math.sqrt(reach / 4) });
+}
+function drawSoftCorals(g, layer, t) {
+  for (const c of REEF.soft) {
+    if (c.layer !== layer) continue;
+    // lean with the current, plus a slow sway of its own; a shear keeps the base planted while the top moves
+    const lean = -(CURRENT.v * 0.6 + Math.sin(t * c.f + c.ph + c.x * 0.003) + 0.35 * Math.sin(t * c.f * 2.3 + c.ph * 1.7)) * c.amp;
+    g.save(); g.translate(c.x, c.y); g.transform(1, 0, Math.tan(lean), 1, 0, 0);
+    g.drawImage(c.spr, -c.w / 2, -c.top, c.w, c.top + c.bot);
+    g.restore();
+  }
 }
 
 function decorateRock(g, r, baseY, dens = 1, reserve = []) {
@@ -61,13 +91,13 @@ function decorateRock(g, r, baseY, dens = 1, reserve = []) {
     if (k < 0.15) brainCoral(g, it.x, it.y, s * 1.25);
     else if (k < 0.35) branchingCoral(g, it.x, it.y, s);
     else if (k < 0.44) (it.crest && SR() < 0.45 ? tableCoral : branchingCoral)(g, it.x, it.y, s * 0.9);
-    else if (k < 0.54) (it.crest ? seaFan : zoanthids)(g, it.x, it.y, s * 0.9);
+    else if (k < 0.54) { if (it.crest) softCoral(g, seaFan, it.x, it.y, s * 0.9, 5); else zoanthids(g, it.x, it.y, s * 0.9); }
     else if (k < 0.64) tubeSponge(g, it.x, it.y, s * 0.85);
     else if (k < 0.75) zoanthids(g, it.x, it.y, s);
-    else if (k < 0.83) treeCoral(g, it.x, it.y, s * 0.85);
+    else if (k < 0.83) softCoral(g, treeCoral, it.x, it.y, s * 0.85, 3.2);
     else if (k < 0.89) bubbleCoral(g, it.x, it.y, s * 0.85);
     else if (k < 0.95) giantClam(g, it.x, it.y, s * 0.8);
-    else seaWhip(g, it.x, it.y, s * 0.8);
+    else softCoral(g, seaWhip, it.x, it.y, s * 0.8, 6.5);
   }
 }
 
@@ -107,6 +137,7 @@ function buildReef() {
   MK = mg; FL = flg;
 
   /* back reef — farther formations, fogged */
+  REEF.soft = []; REEF.softLayer = 'back';
   FLA = 0.35;
   const nb = Math.max(2, Math.round(W / 420));
   for (let i = 0; i < nb; i++) {
@@ -118,7 +149,7 @@ function buildReef() {
   bg.save(); bg.globalCompositeOperation = 'source-atop'; bg.fillStyle = rgbStr(FOG_RGB, 0.44); bg.fillRect(-10, REEF.bandTop - 10, W + 20, H); bg.restore();
 
   /* front reef */
-  FLA = 1;
+  FLA = 1; REEF.softLayer = 'front';
   paintSand(fg, mg);
   const narrow = W / H < 0.9;
   const spec = narrow
@@ -171,6 +202,7 @@ function buildReef() {
   for (let c = 0; c < cols; c++) { let r = 0; while (r < rows && hd[(r * cols + c) * 4 + 3] < 140) r++; REEF.top[c] = REEF.bandTop + r * st; }
 
   REEF.back = back; REEF.front = front; REEF.fg = fore; REEF.fluo = fl; REEF.mask = mask;
+  REEF.lit = fglRelight(back, front);
   const cl = mk(W * PX * 0.38, (H - REEF.bandTop) * PX * 0.38); cl.scale = PX * 0.38; ENV.cLayer = cl; ENV.cPats = [];
   FL = null; MK = null;
 }

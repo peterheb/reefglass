@@ -114,7 +114,8 @@ class Fish {
     if (this.y < top) this.vy += (top - this.y) * 3 * dt;
     if (this.y > fl) this.vy -= (this.y - fl) * 4 * dt;
     if (this.x < -W * 0.2) this.vx += U * 8 * dt; if (this.x > W * 1.2) this.vx -= U * 8 * dt;
-    this.x += this.vx * dt; this.y += this.vy * dt;
+    this.x += (this.vx + CURRENT.v * U * 0.12 * depthScale(this.z)) * dt;
+    this.y += (this.vy + Math.sin(this.age * (0.6 + (this.seed % 0.5)) + this.seed) * U * 0.12) * dt;
     this.z = ease(this.z, this.tz, this.flee > 0 ? 1.2 : 0.25, dt);
     // orientation
     if (this.vx * this.dir < -U * 0.35 * depthScale(this.z) && this.turnCd <= 0) { this.dir = -this.dir; this.turnCd = 0.7; }
@@ -123,26 +124,30 @@ class Fish {
     this.pitch = ease(this.pitch, pt, 4, dt);
     this.speed = Math.hypot(this.vx, this.vy);
     const eff = clamp(this.speed / (cruise + 1), 0.25, 2.2);
-    this.phase += dt * TAU * sw.tailHz * (0.35 + 0.75 * eff) * (night ? 0.7 : 1);
+    this.phase += dt * TAU * sw.tailHz * (0.9 + 0.2 * ((this.seed * 7.13) % 1)) * (0.35 + 0.75 * eff) * (night ? 0.7 : 1);
     this.pecPh += dt * TAU * (sw.pecHz ?? 2.5) * (0.6 + 0.4 * eff);
     if (TOD.night > 0.3 && this.speed > U * 2 && Math.random() < dt * this.speed / U * 0.25) spark(this.x - this.dir * this.px * 0.5, this.y + rand(-2, 2), 0.7);
   }
   draw(g) {
-    const sp = this.sp, s = depthScale(this.z), k = this.size * U * s, fog = depthFog(this.z), dev = PX;
+    const sp = this.sp, s = depthScale(this.z), k = this.size * U * s, fog = depthFog(this.z), dev = PX, gl = !!this.glTile;
     const fx = this.face, fw = Math.max(Math.abs(fx), 0.12) * sgn(fx);
     const osc = Math.sin(this.phase), ta = sp.swim.tailAmp * clamp(0.55 + 0.5 * this.speed / (this.cruise() + 1), 0.4, 1.3);
+    const inf = this.inflate || 0, bodyA = 1 - inf;
+    // a 3D fish replaces the tail, body and pectoral sprites; overlays below still draw on top
+    if (gl && bodyA > 0.02) { g.globalAlpha = bodyA; fglBlit(g, this); g.globalAlpha = 1; }
     g.save(); g.translate(this.x, this.y); g.rotate(this.pitch * sgn(fx)); g.scale(fw, 1);
     if (this.gulp > 0) g.scale(1 + this.gulp * 0.12, 1 - this.gulp * 0.06);
-    const inf = this.inflate || 0, bodyA = 1 - inf;
     if (bodyA > 0.02) {
       g.globalAlpha = bodyA;
-      g.save(); g.translate(sp.tailAt[0] * k, sp.tailAt[1] * k); g.rotate(osc * ta * 0.18); g.scale(Math.cos(osc * ta * 1.5), 1 - 0.04 * Math.abs(osc));
-      sp.tailSpr.draw(g, 0, 0, sp.tailBox[0] * k, sp.tailBox[1] * k, fog, dev); g.restore();
+      if (!gl) {
+        g.save(); g.translate(sp.tailAt[0] * k, sp.tailAt[1] * k); g.rotate(osc * ta * 0.18); g.scale(Math.cos(osc * ta * 1.5), 1 - 0.04 * Math.abs(osc));
+        sp.tailSpr.draw(g, 0, 0, sp.tailBox[0] * k, sp.tailBox[1] * k, fog, dev); g.restore();
+      }
       g.save(); g.translate(-osc * ta * k * 0.012, 0);
-      sp.bodySpr.draw(g, 0, 0, sp.box[0] * k, sp.box[1] * k, fog, dev);
+      if (!gl) sp.bodySpr.draw(g, 0, 0, sp.box[0] * k, sp.box[1] * k, fog, dev);
       if (sp.extra) { g.globalAlpha = bodyA * (1 - fog * 0.75); sp.extra(g, this, k); g.globalAlpha = bodyA; }
       g.restore();
-      if (sp.pecSpr) {
+      if (sp.pecSpr && !gl) {
         g.save(); g.translate(sp.pecAt[0] * k, sp.pecAt[1] * k); g.rotate(-(sp.pecAng + 0.28 * Math.sin(this.pecPh)));
         g.scale(0.55 + 0.45 * Math.abs(Math.cos(this.pecPh)), 1); sp.pecSpr.draw(g, 0, 0, sp.pecBox[0] * k, sp.pecBox[1] * k, fog, dev); g.restore();
       }
@@ -168,12 +173,18 @@ class Seahorse {
   }
   get info() { return SEAHORSE; }
   update(dt) { this.age += dt; }
-  draw(g) {
-    const b = this.blade; if (!b || !b.pts) return;
-    const n = b.pts.length - 1, i = Math.round(this.u * n), [px, py, pa] = b.pts[i];
-    const h = U * 6.2, t = this.age;
+  // where it clings on its blade of seagrass, and how it leans
+  pose() {
+    const b = this.blade; if (!b || !b.pts) return null;
+    const n = b.pts.length - 1, [px, py, pa] = b.pts[Math.round(this.u * n)], h = U * 6.2;
     this.x = px; this.y = py - h * 0.5;
-    g.save(); g.translate(px, py); g.rotate((pa + Math.PI / 2) * 0.5 + Math.sin(t * 0.4) * 0.08 - 0.05);
+    return { px, py, h, rot: (pa + Math.PI / 2) * 0.5 + Math.sin(this.age * 0.4) * 0.08 - 0.05 };
+  }
+  draw(g) {
+    if (this.glTile) return fglBlit(g, this);
+    const P = this.pose(); if (!P) return;
+    const { px, py, h } = P, t = this.age;
+    g.save(); g.translate(px, py); g.rotate(P.rot);
     const spr = SEAHORSE.spr;
     spr.draw(g, 0, 0, h * 0.8, h * 1.18, 0.05, PX);
     g.save(); g.translate(-0.12 * h, -0.52 * h); g.scale(0.35 + 0.65 * Math.abs(Math.sin(t * 37)), 1);
@@ -182,6 +193,21 @@ class Seahorse {
   }
   hit(x, y) { if (this.x === undefined) return -1; const r = U * 4.5; return dist2(x, y, this.x, this.y) < r * r ? Math.sqrt(dist2(x, y, this.x, this.y)) / r : -1; }
   anchor() { return [this.x, this.y - U * 3]; }
+}
+
+let SHADOW = null;
+function drawShadows(g) {
+  const day = TOD.day; if (day < 0.05) return;
+  if (!SHADOW) SHADOW = makeGlow(32, [[0, 'rgba(6,14,28,0.85)'], [0.55, 'rgba(6,14,28,0.35)'], [1, 'rgba(6,14,28,0)']]);
+  const ents = FISH.list.map((f) => [f.x, f.y, f.px, f.z]);
+  const v = VIS.active; if (v && v.k && v.x !== undefined && !v.pod) ents.push([v.x, v.y, v.k * 0.7, v.z]);
+  for (const [x, y, len, z] of ents) {
+    if (z > 0.45) continue;                             // fish behind the front reef would shade reef we barely see
+    const top = reefTopAt(x), h = top - y; if (h < 0 || h > H * 0.4) continue;
+    const k = 1 - h / (H * 0.4), sx = x + (x - ENV.sunX) / H * h * 0.6, w = len * (0.9 + (1 - k) * 0.8);
+    g.globalAlpha = 0.32 * day * k * k; g.drawImage(SHADOW, sx - w / 2, reefTopAt(sx) - w * 0.1, w, w * 0.26);
+  }
+  g.globalAlpha = 1;
 }
 
 function makeSchool(ids, n, zc) {

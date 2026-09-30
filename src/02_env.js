@@ -124,16 +124,17 @@ function buildRays() {
   for (let i = 0; i < Math.round(W / 55); i++) ENV.glints.push({ x: rand(W), y: rand(0.004, 0.05) * H, s: rand(0.6, 1.6), v: rand(-14, 14), ph: rand(TAU), f: rand(0.4, 1.3) });
 }
 
-function drawRays(g, t) {
-  const day = TOD.day, amt = REDUCED ? 0.6 : 1;
-  const sunY = -H * 1.3;
+// where each shaft is this frame; shared by the 2D rays and the 3D models swimming through them
+function updateRays(t) {
+  const day = TOD.day, amt = REDUCED ? 0.6 : 1, sunY = -H * 1.3;
+  ENV.rayNow = ENV.rays.map((r) => {
+    const x = r.x + Math.sin(t * r.f * 0.7 + r.ph) * r.sway, pulse = 0.55 + 0.45 * Math.sin(t * r.f * TAU * 0.35 + r.ph);
+    return { r, x, ang: Math.atan2(x - ENV.sunX, -sunY) * 0.9, aDay: r.a * pulse * 0.42 * day * amt, aNight: r.a * 0.55 * TOD.night * amt * TOD.moon };
+  });
+}
+function drawRays(g) {
   g.globalCompositeOperation = 'lighter';
-  for (const r of ENV.rays) {
-    const x = r.x + Math.sin(t * r.f * 0.7 + r.ph) * r.sway;
-    const ang = Math.atan2(x - ENV.sunX, -sunY) * 0.9;
-    const pulse = 0.55 + 0.45 * Math.sin(t * r.f * TAU * 0.35 + r.ph);
-    const aDay = r.a * pulse * 0.42 * day * amt;
-    const aNight = r.a * 0.55 * TOD.night * amt * TOD.moon;
+  for (const { r, x, ang, aDay, aNight } of ENV.rayNow) {
     g.save(); g.translate(x, -H * 0.01); g.rotate(-ang);
     if (aDay > 0.005) { g.globalAlpha = aDay; g.drawImage(ENV.rayWarm, -r.w / 2, 0, r.w, r.len); }
     if (aNight > 0.005) { g.globalAlpha = aNight; g.drawImage(ENV.rayCool, -r.w / 2, 0, r.w * 0.8, r.len * 0.8); }
@@ -149,6 +150,18 @@ function drawSurface(g, t) {
   gr.addColorStop(0, `rgba(235,255,252,${0.5 * lum})`); gr.addColorStop(0.35, `rgba(170,240,245,${0.16 * lum})`); gr.addColorStop(1, 'rgba(120,220,240,0)');
   g.fillStyle = gr; g.fillRect(0, 0, W, H * 0.1);
   g.globalCompositeOperation = 'lighter';
+  // the underside of the waves: two drifting ripple patterns, squashed by the grazing view and fading with distance below
+  if (ENV.cFrames.length) {
+    const F = ENV.cFrames.length, band = H * 0.075, S = ENV.cFrames[0].height;
+    for (const [dir, sp, a, tw] of [[1, 0.9, 0.17, U * 23], [-1, 0.55, 0.11, U * 37]]) {   // unequal tiles, so the repeats never line up
+      const fr = ENV.cFrames[Math.floor(t * 5 * sp) % F], off = ((t * U * 2.4 * sp * dir) % tw + tw) % tw;
+      for (const [y0, y1, k] of [[0, 0.35, 1], [0.35, 0.65, 0.55], [0.65, 1, 0.2]]) {
+        g.globalAlpha = a * k * lum;
+        for (let x = -tw + off; x < W + tw; x += tw) g.drawImage(fr, 0, S * y0, S, S * (y1 - y0), x, band * y0, tw, band * (y1 - y0));
+      }
+    }
+    g.globalAlpha = 1;
+  }
   // travelling wave lines
   for (let k = 0; k < 4; k++) {
     const y0 = H * (0.012 + k * 0.011), amp = H * (0.004 + k * 0.0015), sp = 0.35 + k * 0.17;
@@ -201,7 +214,8 @@ function buildCausticFrames() {
 
 function drawCaustics(g, t) {
   if (!REEF.mask || !ENV.cFrames.length) return;
-  const inten = 0.36 * TOD.day + 0.05 * TOD.night;
+  // the 3D mode's mask follows the surfaces' real slope, so it can take stronger light
+  const inten = (FGL.on ? 0.46 : 0.36) * TOD.day + 0.05 * TOD.night;
   if (inten < 0.02) return;
   const L = ENV.cLayer, lg = L.getContext('2d');
   const F = ENV.cFrames.length, ft = (t * (REDUCED ? 3 : 7)) % F, i0 = Math.floor(ft), fr = ft - i0;
@@ -215,17 +229,18 @@ function drawCaustics(g, t) {
   lg.globalCompositeOperation = 'lighter'; lg.globalAlpha = fr;
   pb.setTransform(m); lg.fillStyle = pb; lg.fillRect(0, 0, L.width, L.height);
   lg.globalAlpha = 1; lg.globalCompositeOperation = 'destination-in';
-  lg.drawImage(REEF.mask, 0, 0, L.width, L.height);
+  lg.drawImage(reefLayer('mask'), 0, 0, L.width, L.height);
   lg.globalCompositeOperation = 'source-over';
   g.globalCompositeOperation = 'lighter'; g.globalAlpha = inten;
-  g.drawImage(L, 0, REEF.bandTop, W, H - REEF.bandTop);
+  g.drawImage(L, -CAM.pad, REEF.bandTop, W + 2 * CAM.pad, H - REEF.bandTop);
   g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 }
 
 /* ---------- grading and lens ---------- */
 function drawGrade(g) {
   const n = TOD.night, w = TOD.warm;
-  let top = mixRGB([255, 255, 255], [62, 86, 142], n), bot = mixRGB([196, 214, 232], [22, 34, 72], n);
+  // in 3D mode the water itself does the colouring by day, so the floor is only darkened, not tinted blue
+  let top = mixRGB([255, 255, 255], [62, 86, 142], n), bot = mixRGB(FGL.on ? [222, 228, 234] : [196, 214, 232], [22, 34, 72], n);
   top = mixRGB(top, [255, 190, 150], w * 0.75); bot = mixRGB(bot, [112, 96, 150], w * 0.6);
   const gr = g.createLinearGradient(0, 0, 0, H);
   gr.addColorStop(0, rgbStr(top)); gr.addColorStop(1, rgbStr(bot));

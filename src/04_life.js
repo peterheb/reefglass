@@ -28,29 +28,35 @@ function initAnemone() {
   LIFE.anemone = { x: a.x, y: a.y, R: U * 4, pal, tent, shrink: 0 };
 }
 
+// each tentacle's curve this frame: base (bx, by), bend (mx, my), bulb (ex, ey); shared by the 2D and 3D drawings
+function anemoneTentacles(t) {
+  const A = LIFE.anemone, sh = 1 - A.shrink * 0.45;
+  for (const tn of A.tent) {
+    const bx = A.x + tn.u * A.R, by = A.y - Math.cos(tn.u * 1.2) * U * 0.6;
+    const sway = 0.28 * Math.sin(t * 0.9 - bx * 0.018) + 0.1 * Math.sin(t * 2.3 + tn.ph);
+    const L = tn.len * sh, a1 = tn.a + sway * 0.6, a2 = tn.a + sway * 1.5;
+    tn.bx = bx; tn.by = by; tn.mx = bx + Math.cos(a1) * L * 0.55; tn.my = by + Math.sin(a1) * L * 0.55;
+    tn.ex = tn.mx + Math.cos(a2) * L * 0.5; tn.ey = tn.my + Math.sin(a2) * L * 0.5;
+  }
+}
 function drawAnemone(g, t, part) {
   const A = LIFE.anemone; if (!A) return;
   const [base, tip] = A.pal, bRGB = hexRGB(base), tRGB = hexRGB(tip);
-  if (part === 'back') {
+  if (part === 'back' && !ANEMONE_BACK.glTile) {
     g.fillStyle = shadeHex(base, 0.35);
     g.beginPath(); g.ellipse(A.x, A.y + U * 0.2, A.R * 0.95, U * 1.1, 0, 0, TAU); g.fill();
   }
-  const sh = 1 - A.shrink * 0.45;
+  const tile = part === 'back' ? ANEMONE_BACK : ANEMONE_ENT;
+  if (tile.glTile) return fglBlit(g, tile);
+  anemoneTentacles(t);
   g.lineCap = 'round';
   for (const tn of A.tent) {
     if ((part === 'back') !== tn.back) continue;
-    const bx = A.x + tn.u * A.R, by = A.y - Math.cos(tn.u * 1.2) * U * 0.6;
-    const sway = 0.28 * Math.sin(t * 0.9 - bx * 0.018) + 0.1 * Math.sin(t * 2.3 + tn.ph);
-    const L = tn.len * sh;
-    const a1 = tn.a + sway * 0.6, a2 = tn.a + sway * 1.5;
-    const mx = bx + Math.cos(a1) * L * 0.55, my = by + Math.sin(a1) * L * 0.55;
-    const ex = mx + Math.cos(a2) * L * 0.5, ey = my + Math.sin(a2) * L * 0.5;
-    const k = tn.back ? 0.25 : 0;
+    const { bx, by, mx, my, ex, ey } = tn, k = tn.back ? 0.25 : 0;
     g.strokeStyle = rgbStr(mixRGB(mixRGB(bRGB, tRGB, 0.35), [30, 20, 40], k)); g.lineWidth = tn.w;
     g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(mx, my, ex, ey); g.stroke();
     g.fillStyle = rgbStr(mixRGB(tRGB, [30, 20, 40], k)); g.beginPath(); g.arc(ex, ey, tn.w * 0.72, 0, TAU); g.fill();
     g.fillStyle = 'rgba(255,255,255,0.5)'; g.beginPath(); g.arc(ex - tn.w * 0.2, ey - tn.w * 0.25, tn.w * 0.22, 0, TAU); g.fill();
-    tn.ex = ex; tn.ey = ey;
   }
 }
 function glowAnemone(g) {
@@ -65,20 +71,28 @@ function glowAnemone(g) {
 function initGrass() {
   LIFE.grass = REEF.grass.map((c) => ({ ...c, front: c.y > H * 0.955, blades: Array.from({ length: c.n }, () => ({ dx: rand(-U * 1.4, U * 1.4), h: c.h * rand(0.55, 1.15), w: U * rand(0.32, 0.58), lean: rand(-0.25, 0.25), ph: rand(TAU), col: pick(['#3f8f4a', '#58a64e', '#2f7a44', '#6cb35a', '#4a9a6a']) })) }));
 }
+// the centre line of every blade in a clump this frame, [x, y, angle] per point (the seahorse clings to one)
+function grassLines(c, t) {
+  for (const b of c.blades) {
+    const n = 7, pts = [];
+    let x = c.x + b.dx, y = c.y, a = -Math.PI / 2 + b.lean;
+    const seg = b.h / n;
+    for (let i = 0; i <= n; i++) {
+      pts.push([x, y, a]);
+      const s = i / n;
+      a += (0.08 * Math.sin(t * 1.1 - x * 0.01 + b.ph) + 0.05 * Math.sin(t * 2.6 + b.ph + i * 0.5) + 0.01 + CURRENT.v * 0.04) * (0.4 + s * 1.2);
+      x += Math.cos(a) * seg; y += Math.sin(a) * seg;
+    }
+    b.pts = pts;
+  }
+}
 function drawGrass(g, t, front) {
   for (const c of LIFE.grass) {
     if (c.front !== front) continue;
+    if (c.glTile) { fglBlit(g, c); continue; }
+    grassLines(c, t);
     for (const b of c.blades) {
-      const n = 7, pts = [];
-      let x = c.x + b.dx, y = c.y, a = -Math.PI / 2 + b.lean;
-      const seg = b.h / n;
-      for (let i = 0; i <= n; i++) {
-        pts.push([x, y, a]);
-        const s = i / n;
-        a += (0.08 * Math.sin(t * 1.1 - x * 0.01 + b.ph) + 0.05 * Math.sin(t * 2.6 + b.ph + i * 0.5) + 0.035) * (0.4 + s * 1.2);
-        x += Math.cos(a) * seg; y += Math.sin(a) * seg;
-      }
-      b.pts = pts;
+      const n = 7, pts = b.pts;
       g.beginPath();
       for (let i = 0; i <= n; i++) { const [px, py, pa] = pts[i], w = b.w * (1 - (i / n) * 0.75) * 0.5; const nx = -Math.sin(pa), ny = Math.cos(pa); i ? g.lineTo(px + nx * w, py + ny * w) : g.moveTo(px + nx * w, py + ny * w); }
       for (let i = n; i >= 0; i--) { const [px, py, pa] = pts[i], w = b.w * (1 - (i / n) * 0.75) * 0.5; const nx = -Math.sin(pa), ny = Math.cos(pa); g.lineTo(px - nx * w, py - ny * w); }
@@ -107,19 +121,41 @@ function updateEels(dt) {
     e.ext = ease(e.ext, tgt, tgt < e.ext ? 6 : 0.7, dt);
   }
 }
+// which way the colony faces (they all turn their heads into the current)
+const eelFacing = (t) => (Math.sin(t * 0.13) > 0 ? -1 : 1);
+// an eel's centre line this frame, burrow to head
+function eelLine(e, t, cur) {
+  const L = e.len * e.ext, n = 12, seg = L / n, pts = [];
+  let x = e.x, y = e.y, a = -Math.PI / 2;
+  for (let i = 0; i <= n; i++) {
+    pts.push([x, y]);
+    const s = i / n;
+    a = -Math.PI / 2 + 0.18 * Math.sin(t * 1.2 + e.ph + s * 2.5) * s + cur * 1.5 * smooth((s - 0.62) / 0.38) * e.ext;
+    x += Math.cos(a) * seg; y += Math.sin(a) * seg;
+  }
+  return pts;
+}
+function eelFace(g, e, pts, cur) {
+  const [hx, hy] = pts[12];
+  g.fillStyle = '#111'; g.beginPath(); g.arc(hx + cur * e.w * 0.2, hy - e.w * 0.12, e.w * 0.2, 0, TAU); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.arc(hx + cur * e.w * 0.26, hy - e.w * 0.2, e.w * 0.07, 0, TAU); g.fill();
+}
 function drawEels(g, t) {
-  const cur = Math.sin(t * 0.13) > 0 ? -1 : 1;
+  const cur = eelFacing(t);
+  if (EELS_GL.glTile) {
+    // burrows, then the 3D colony, then eyes and the sand collars in front of each burrow
+    for (const e of LIFE.eels) { g.fillStyle = 'rgba(40,28,18,0.75)'; g.beginPath(); g.ellipse(e.x, e.y, e.w * 1.1, e.w * 0.38, 0, 0, TAU); g.fill(); }
+    fglBlit(g, EELS_GL);
+    for (const e of LIFE.eels) {
+      if (e.ext >= 0.04) eelFace(g, e, eelLine(e, t, cur), cur);
+      g.fillStyle = shadeHex('#d9c59a', 0.1); g.beginPath(); g.ellipse(e.x, e.y + e.w * 0.18, e.w * 0.9, e.w * 0.28, 0, 0, Math.PI); g.fill();
+    }
+    return;
+  }
   for (const e of LIFE.eels) {
     g.fillStyle = 'rgba(40,28,18,0.75)'; g.beginPath(); g.ellipse(e.x, e.y, e.w * 1.1, e.w * 0.38, 0, 0, TAU); g.fill();
     if (e.ext < 0.04) continue;
-    const L = e.len * e.ext, n = 12, seg = L / n, pts = [];
-    let x = e.x, y = e.y, a = -Math.PI / 2;
-    for (let i = 0; i <= n; i++) {
-      pts.push([x, y]);
-      const s = i / n;
-      a = -Math.PI / 2 + 0.18 * Math.sin(t * 1.2 + e.ph + s * 2.5) * s + cur * 1.5 * smooth((s - 0.62) / 0.38) * e.ext;
-      x += Math.cos(a) * seg; y += Math.sin(a) * seg;
-    }
+    const n = 12, pts = eelLine(e, t, cur);
     g.lineCap = 'round'; g.lineJoin = 'round';
     g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])));
     g.strokeStyle = '#3a3226'; g.lineWidth = e.w + 1.6; g.stroke();
@@ -128,8 +164,7 @@ function drawEels(g, t) {
     for (let i = 1; i < n; i++) { const [px, py] = pts[i]; g.beginPath(); g.arc(px + (i % 2 ? 1 : -1) * e.w * 0.18, py, e.w * 0.14, 0, TAU); g.fill(); }
     const [hx, hy] = pts[n];
     g.fillStyle = '#efe9d8'; g.beginPath(); g.arc(hx, hy, e.w * 0.62, 0, TAU); g.fill();
-    g.fillStyle = '#111'; g.beginPath(); g.arc(hx + cur * e.w * 0.2, hy - e.w * 0.12, e.w * 0.2, 0, TAU); g.fill();
-    g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.arc(hx + cur * e.w * 0.26, hy - e.w * 0.2, e.w * 0.07, 0, TAU); g.fill();
+    eelFace(g, e, pts, cur);
     g.fillStyle = shadeHex('#d9c59a', 0.1); g.beginPath(); g.ellipse(e.x, e.y + e.w * 0.18, e.w * 0.9, e.w * 0.28, 0, 0, Math.PI); g.fill();
   }
 }
@@ -149,6 +184,14 @@ function updateChest(dt) {
 function drawChest(g) {
   const c = LIFE.chest; if (!c) return;
   const w = U * 6.2, h = U * 3.1, x = c.x, y = c.y;
+  if (c.glTile) {
+    g.save(); g.translate(x, y); g.rotate(-0.05); contactShadow(g, 0, h * 0.1, w * 0.8); g.restore();
+    fglBlit(g, c);
+    g.save(); g.translate(x, y); g.rotate(-0.05);
+    g.fillStyle = '#cdb287'; g.beginPath(); g.ellipse(-w * 0.15, h * 0.05, w * 0.62, h * 0.24, 0, Math.PI, TAU); g.fill();   // sand drifted over the base
+    g.restore();
+    return;
+  }
   g.save(); g.translate(x, y); g.rotate(-0.05);
   contactShadow(g, 0, h * 0.1, w * 0.8);
   const wood = g.createLinearGradient(0, -h, 0, 0); wood.addColorStop(0, '#7a4a2a'); wood.addColorStop(1, '#3d2414');
@@ -181,7 +224,7 @@ function drawChest(g) {
 function glowChest(g) { const c = LIFE.chest; if (!c || c.open < 0.05) return; g.globalAlpha = c.open * (0.35 + 0.5 * TOD.night); const s = U * 12; g.drawImage(GLOW.warm, c.x - s / 2, c.y - U * 3.6 - s / 2, s, s); g.globalAlpha = 1; }
 
 /* ---------- bubbles ---------- */
-function spawnBubble(x, y, r) { if (LIFE.bubbles.length < 420) LIFE.bubbles.push({ x, y, r, ph: rand(TAU), wf: rand(2, 5), pop: 0 }); }
+function spawnBubble(x, y, r) { if (LIFE.bubbles.length < 420) LIFE.bubbles.push({ x, y, r, ph: rand(TAU), wf: rand(2, 5), vf: rand(0.82, 1.2), pop: 0 }); }
 function updateBubbles(dt) {
   const v = REEF.vent;
   if (v) { LIFE.ventT -= dt; if (LIFE.ventT < 0) { LIFE.ventT = Math.random() < 0.08 ? 0.02 : rand(0.1, 0.35); spawnBubble(v.x + rand(-2, 2), v.y, U * rand(0.1, 0.32)); } }
@@ -189,10 +232,16 @@ function updateBubbles(dt) {
   for (let i = LIFE.bubbles.length - 1; i >= 0; i--) {
     const b = LIFE.bubbles[i];
     if (b.pop > 0) { b.pop += dt * 3; if (b.pop > 1) LIFE.bubbles.splice(i, 1); continue; }
-    b.y -= (U * 3.5 + b.r * 9) * dt;
-    b.x += Math.sin(b.y * 0.03 + b.ph) * b.r * 1.4 * dt * b.wf;
-    b.r *= 1 + 0.03 * dt;
-    if (b.y < surf) b.pop = 0.01;
+    b.y -= (U * 3.5 + b.r * 9) * b.vf * dt;
+    b.x += Math.sin(b.y * 0.03 + b.ph) * b.r * 1.4 * dt * b.wf + CURRENT.v * U * 0.45 * dt;
+    b.r *= 1 + 0.03 * dt;   // expands as the pressure drops
+    if (b.y < surf || (b.r < U * 0.2 && Math.random() < dt * 0.015)) b.pop = 0.01;
+  }
+  // bubbles that touch coalesce into one of the combined volume
+  const B = LIFE.bubbles;
+  for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
+    const a = B[i], c = B[j]; if (a.pop || c.pop) continue;
+    if (Math.abs(a.x - c.x) < a.r + c.r && Math.abs(a.y - c.y) < (a.r + c.r) * 0.6) { a.r = Math.cbrt(a.r ** 3 + c.r ** 3); a.vf = (a.vf + c.vf) / 2; B.splice(j, 1); j--; }
   }
 }
 function drawBubbles(g) {
@@ -211,8 +260,10 @@ function initSnow() {
 }
 function updateSnow(dt, t) {
   for (const p of LIFE.snow) {
-    const sp = lerp(1.4, 0.5, p.z);
-    p.y += U * 0.35 * sp * dt; p.x += (Math.sin(t * 0.25 + p.ph) * 0.4 + 0.15) * U * sp * dt;
+    // suspended matter: carried by the current, barely sinking, each wandering on its own
+    const sp = lerp(1.4, 0.5, p.z), w = p.s * 3.1;
+    p.y += U * (0.1 + 0.22 * Math.sin(t * 0.21 * w + p.ph)) * sp * dt;
+    p.x += (CURRENT.v * 0.9 + Math.sin(t * 0.17 * w + p.ph * 2) * 0.35) * U * sp * dt;
     if (p.y > H + 10) { p.y = -10; p.x = rand(W); } if (p.x > W + 10) p.x = -10; if (p.x < -10) p.x = W + 10;
   }
 }
@@ -220,7 +271,7 @@ function drawSnow(g, near) {
   for (const p of LIFE.snow) {
     const isNear = p.z < 0.12; if (isNear !== near) continue;
     if (near) { const s = U * (1.6 + (0.12 - p.z) * 14) * p.s; g.globalAlpha = 0.07 + 0.05 * Math.sin(p.ph); g.drawImage(GLOW.soft, p.x - s / 2, p.y - s / 2, s, s); }
-    else { const s = U * lerp(0.42, 0.14, p.z) * p.s; g.globalAlpha = lerp(0.55, 0.18, p.z); g.drawImage(GLOW.dot, p.x - s / 2, p.y - s / 2, s, s); }
+    else { const s = U * lerp(0.42, 0.14, p.z) * p.s; g.globalAlpha = lerp(0.42, 0.1, p.z); g.drawImage(GLOW.dot, p.x - s / 2, p.y - s / 2, s, s); }
   }
   g.globalAlpha = 1;
 }
@@ -241,7 +292,7 @@ function updateFood(dt, t) {
   for (let i = LIFE.food.length - 1; i >= 0; i--) {
     const f = LIFE.food[i]; f.life += dt;
     if (f.rest > 0) { f.rest += dt; if (f.rest > 14) LIFE.food.splice(i, 1); continue; }
-    f.y += f.vy * dt; f.x += Math.sin(t * 1.3 + f.ph) * U * 0.6 * dt; f.rot += dt * 0.8;
+    f.y += f.vy * dt; f.x += (Math.sin(t * 1.3 + f.ph) * 0.6 + CURRENT.v * 0.4) * U * dt; f.rot += dt * 0.8;
     if (f.y >= reefTopAt(f.x) - U * 0.3) f.rest = 0.01;
   }
 }
@@ -275,6 +326,7 @@ class Jelly {
     if (TOD.night > 0.3 && this.kind === 'crystal' && Math.random() < dt * 3) spark(this.x + rand(-this.r, this.r) * depthScale(this.z), this.y + rand(0, this.r) * depthScale(this.z), 0.6);
   }
   draw(g, t) {
+    if (this.glTile) return fglBlit(g, this);
     const s = depthScale(this.z), fog = depthFog(this.z), r = this.r * s, p = this.p || 0;
     const w = r * (1 - 0.2 * p), h = r * 0.62 * (1 + 0.28 * p);
     g.save(); g.translate(this.x, this.y); g.rotate(this.tilt); g.globalAlpha = 1 - fog * 0.55;
